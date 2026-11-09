@@ -1,29 +1,8 @@
-<!doctype html>
-<html lang="id">
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Metro | Layanan Metrologi Legal</title>
-	<style>
-		:root { color-scheme: light; --ink: #17324d; --muted: #617184; --line: #e3eaf0; --paper: #f5f8fb; --white: #fff; --accent: #c68c24; }
-		* { box-sizing: border-box; }
-		body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-		main { max-width: 920px; margin: 8vh auto; padding: 0 24px; }
-		.card { padding: clamp(24px, 5vw, 48px); background: var(--white); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 14px 40px #1834510c; }
-		.eyebrow { color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
-		h1 { max-width: 650px; margin: 12px 0; font-size: clamp(30px, 5vw, 48px); line-height: 1.1; letter-spacing: -.035em; }
-		p { max-width: 640px; color: var(--muted); }
-		.pill { display: inline-flex; margin-top: 16px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 13px; }
-	</style>
-</head>
-<body>
-	<main>
-		<section class="card">
-			<div class="eyebrow">UPT Metrologi Legal Kabupaten Rembang</div>
-			<h1>Ruang layanan tera dan tera ulang UTTP</h1>
-			<p>Kerangka aplikasi Metro sudah disiapkan. Tahap berikutnya adalah menyepakati alur layanan, menyiapkan database, lalu membangun ruang pemohon dan ruang kerja petugas.</p>
-			<span class="pill">CodeIgniter 3.1.13 · draft awal</span>
-		</section>
-	</main>
-</body>
-</html>
+<section class="hero"><div class="hero-copy"><div class="eyebrow">Layanan publik digital</div>
+<h1>Tera dan tera ulang, lebih mudah dipantau.</h1>
+<p>Ajukan pemeriksaan alat ukur, takar, timbang, dan perlengkapannya (UTTP). Pantau setiap unit, lihat catatan petugas, dan unduh hasil yang sudah tersedia.</p>
+<div class="actions"><a class="button gold" href="<?= site_url(!$current_user ? 'register' : ($this->metro->is_staff($current_user->id) ? 'petugas' : 'permohonan/baru')) ?>"><?= $current_user && $this->metro->is_staff($current_user->id) ? 'Buka antrean' : 'Ajukan permohonan' ?> <span aria-hidden="true">→</span></a><a class="button light" href="#alur">Lihat alur layanan</a></div></div>
+<div class="hero-panel"><div class="panel-kicker">Alur layanan</div><div class="flow-step"><span>01</span><div><strong>Ajukan</strong><small>Isi profil dan data UTTP</small></div></div><div class="flow-step"><span>02</span><div><strong>Pemeriksaan</strong><small>Petugas memverifikasi dan menguji</small></div></div><div class="flow-step"><span>03</span><div><strong>Pantau hasil</strong><small>Status dan dokumen per unit</small></div></div></div></section>
+<section class="section" id="alur"><div class="section-heading"><div><div class="eyebrow">Layanan kami</div><h2>Satu permohonan, banyak unit</h2></div><p>Setiap UTTP fisik mendapat status sendiri. Bila ada berkas yang perlu diperbaiki, alasannya akan tampil di halaman permohonan.</p></div>
+<div class="feature-grid"><article class="card feature"><div class="icon">01</div><h3>Profil sekali isi</h3><p>Data pemohon digunakan lagi saat Anda membuat permohonan berikutnya.</p></article><article class="card feature"><div class="icon">02</div><h3>Pelacakan per unit</h3><p>Ketahui tahap pengerjaan setiap unit dalam satu pengajuan.</p></article><article class="card feature"><div class="icon">03</div><h3>Dokumen aman</h3><p>Surat permohonan dan SKHP diunduh melalui akun yang berhak.</p></article></div></section>
+<section class="notice"><strong>Persiapkan sebelum mengajukan</strong><p>Siapkan data pemilik, jenis, merek, tipe, model, kapasitas, jumlah UTTP, dan surat permohonan PDF maksimal 5 MB. Untuk layanan lapangan, siapkan alamat lokasi pemeriksaan.</p></section>

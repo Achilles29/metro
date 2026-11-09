@@ -73,11 +73,12 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 $active_group = 'default';
 $query_builder = TRUE;
 
+$metro_local = is_file('/etc/metro/database.php') ? require '/etc/metro/database.php' : array();
 $db['default'] = array(
 	'dsn'	=> '',
 	'hostname' => 'localhost',
-	'username' => 'root',
-	'password' => '',
+	'username' => isset($metro_local['username']) ? $metro_local['username'] : 'root',
+	'password' => isset($metro_local['password']) ? $metro_local['password'] : '',
 	'database' => 'metro_app',
 	'dbdriver' => 'mysqli',
 	'dbprefix' => '',

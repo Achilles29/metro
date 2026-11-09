@@ -1,4 +1,6 @@
-# Setup CI3 Metro dan Opsi Tema
+# Setup CI3 Metro dan Opsi Tema (catatan rancangan awal)
+
+Implementasi dan konfigurasi produksi terbaru tercatat di `05_implementasi_dan_operasional.md`. Bagian di bawah ini adalah kondisi scaffold sebelum pengembangan.
 
 ## Struktur Proyek Saat Ini
 
