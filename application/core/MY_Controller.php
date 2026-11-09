@@ -51,7 +51,7 @@ class MY_Controller extends CI_Controller
         $data['body_view'] = $view;
         $data['flash'] = $this->session->flashdata('message');
         $data['error'] = isset($data['error']) ? $data['error'] : $this->session->flashdata('error');
-        $this->load->view('layout', $data);
+        $this->load->view($data['current_user'] && $this->metro->is_staff($data['current_user']->id) ? 'staff/layout' : 'layout', $data);
     }
 
     protected function message($text, $url)

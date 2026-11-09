@@ -6,11 +6,83 @@ class Staff extends MY_Controller
     public function index()
     {
         $user = $this->require_staff();
+        $technical_only = $this->technical_only($user->id);
+        $this->page('staff/dashboard', array('title' => 'Dashboard operasional',
+            'summary' => $this->metro->dashboard_summary($technical_only ? $user->id : NULL),
+            'recent' => $this->metro->queue('', $technical_only ? $user->id : NULL, array(), 6),
+            'notifications' => $this->db->where('user_id', $user->id)->order_by('sent_at', 'DESC')->limit(4)->get('notifications')->result()));
+    }
+
+    private function technical_only($user_id)
+    {
+        return $this->metro->has_role($user_id, array('technician'))
+            && !$this->metro->has_role($user_id, array('administrator','verifier','coordinator','issuer'));
+    }
+
+    public function queue()
+    {
+        $user = $this->require_staff();
         $query = mb_substr(trim((string) $this->input->get('q', TRUE)), 0, 100);
-        $technical_only = $this->metro->has_role($user->id, array('technician'))
-            && !$this->metro->has_role($user->id, array('administrator','verifier','coordinator','issuer'));
-        $this->page('staff/index', array('title' => 'Antrean layanan', 'requests' => $this->metro->queue($query, $technical_only ? $user->id : NULL), 'query' => $query,
+        $status = (string) $this->input->get('status', TRUE);
+        $service_type = (string) $this->input->get('service_type', TRUE);
+        $date_from = (string) $this->input->get('date_from', TRUE);
+        $date_to = (string) $this->input->get('date_to', TRUE);
+        $valid_status = array('submitted','verification','revision','scheduled','testing','review','in_progress','completed','rejected','cancelled');
+        $filters = array(
+            'status' => in_array($status, $valid_status, TRUE) ? $status : '',
+            'service_type' => in_array($service_type, array('tera','tera_ulang'), TRUE) ? $service_type : '',
+            'date_from' => $this->valid_date($date_from) ? $date_from : '',
+            'date_to' => $this->valid_date($date_to) ? $date_to : '',
+            'applicant_id' => max(0, (int) $this->input->get('pemohon'))
+        );
+        $selected_applicant = $filters['applicant_id'] ? $this->metro->user($filters['applicant_id']) : NULL;
+        if (!$selected_applicant || $selected_applicant->account_type !== 'applicant') $filters['applicant_id'] = 0;
+        $technical_only = $this->technical_only($user->id);
+        $this->page('staff/index', array('title' => 'Antrean permohonan',
+            'requests' => $this->metro->queue($query, $technical_only ? $user->id : NULL, $filters),
+            'query' => $query, 'filters' => $filters, 'valid_status' => $valid_status,
+            'selected_applicant' => $filters['applicant_id'] ? $selected_applicant : NULL,
             'notifications' => $this->db->where('user_id', $user->id)->order_by('sent_at', 'DESC')->limit(5)->get('notifications')->result()));
+    }
+
+    public function applicants()
+    {
+        $user = $this->require_staff();
+        if (!$this->metro->has_role($user->id, array('administrator'))) show_error('Akses ditolak.', 403);
+        $query = mb_substr(trim((string) $this->input->get('q', TRUE)), 0, 100);
+        $this->page('staff/applicants', array('title' => 'Data pemohon',
+            'applicants' => $this->metro->applicants($query), 'query' => $query));
+    }
+
+    private function valid_date($value)
+    {
+        $date = DateTime::createFromFormat('!Y-m-d', $value);
+        return $date && $date->format('Y-m-d') === $value;
+    }
+
+    public function report()
+    {
+        $user = $this->require_staff();
+        if (!$this->metro->has_role($user->id, array('administrator','coordinator'))) show_error('Akses ditolak.', 403);
+        $period = (string) $this->input->get('period', TRUE);
+        if (!preg_match('/^(20\d{2})-(0[1-9]|1[0-2])$/', $period) || (int) substr($period, 0, 4) > (int) date('Y') + 1) $period = date('Y-m');
+        $start = $period . '-01 00:00:00';
+        $end = date('Y-m-d H:i:s', strtotime($start . ' +1 month'));
+        if ($this->input->get('download') === 'csv') {
+            $this->metro->audit($user->id, 'report_export', 'service_requests', NULL, 'Periode ' . $period);
+            header('Content-Type: text/csv; charset=UTF-8');
+            header('Content-Disposition: attachment; filename="laporan-metro-' . $period . '.csv"');
+            $output = fopen('php://output', 'w');
+            fputcsv($output, array('Nomor permohonan', 'Tanggal masuk', 'Layanan', 'Status saat ini', 'Jumlah unit'));
+            foreach ($this->metro->report_rows($start, $end) as $row) {
+                fputcsv($output, array($row->request_no, $row->submitted_at,
+                    $row->service_type === 'tera_ulang' ? 'Tera ulang' : 'Tera', status_label($row->request_status), (int) $row->unit_count));
+            }
+            fclose($output);
+            exit;
+        }
+        $this->page('staff/report', array('title' => 'Laporan layanan', 'period' => $period,
+            'as_of' => date('Y-m-d H:i:s'), 'report' => $this->metro->report_summary($start, $end)));
     }
 
     public function show($id)
@@ -18,8 +90,7 @@ class Staff extends MY_Controller
         $user = $this->require_staff();
         $request = $this->metro->request((int) $id);
         if (!$request) show_404();
-        $technical_only = $this->metro->has_role($user->id, array('technician'))
-            && !$this->metro->has_role($user->id, array('administrator','verifier','coordinator','issuer'));
+        $technical_only = $this->technical_only($user->id);
         if ($technical_only
             && !$this->db->from('staff_assignments a')->join('request_items i','i.id=a.request_item_id')
                 ->where('i.service_request_id',$request->id)->where('a.assigned_to',$user->id)
