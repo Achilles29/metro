@@ -7,6 +7,7 @@ class MY_Controller extends CI_Controller
     {
         parent::__construct();
         $this->load->model('Metro_model', 'metro');
+        $this->load->model('Master_model', 'master');
         $this->load->helper('metro');
     }
 
@@ -37,6 +38,13 @@ class MY_Controller extends CI_Controller
     {
         $user = $this->require_login();
         if (!$this->metro->is_staff($user->id)) show_error('Akses ditolak.', 403);
+        return $user;
+    }
+
+    protected function require_permission($permission)
+    {
+        $user=$this->require_staff();
+        if (!$this->metro->can($user->id,$permission)) show_error('Akses ditolak.',403);
         return $user;
     }
 

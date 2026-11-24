@@ -7,61 +7,169 @@ class Requests extends MY_Controller
     {
         $user = $this->require_login();
         if ($this->metro->is_staff($user->id)) redirect('petugas');
+        $technician=$user->account_type==='technician';
+        $total=$technician?$this->metro->submitted_requests_count($user->id):$this->metro->requests_for_count($user->id);
+        $pagination = metro_page($total,$this->input->get('page'),10);
         $this->page('requests/index', array('title' => 'Permohonan saya',
-            'requests' => $this->metro->requests_for($user->id),
+            'requests' => $technician
+                ?$this->metro->submitted_requests_for($user->id,$pagination['per_page'],$pagination['offset'])
+                :$this->metro->requests_for($user->id,$pagination['per_page'],$pagination['offset']),
+            'pagination'=>$pagination,
             'notifications' => $this->db->where('user_id', $user->id)->order_by('sent_at', 'DESC')->limit(5)->get('notifications')->result()));
     }
 
     public function create()
     {
         $user = $this->require_login();
-        if ($this->metro->is_staff($user->id)) show_error('Akses ditolak.', 403);
-        $profile = $this->metro->profile($user->id);
-        if (!$profile || !$profile->address) { $this->fail('Lengkapi profil sebelum mengajukan.', 'profil'); return; }
+        $staff=$this->metro->is_staff($user->id);
+        if ($staff && !$this->metro->can($user->id,'requests.create_offline')) show_error('Akses ditolak.',403);
+        $technician=$user->account_type==='technician';
+        if (!$staff && $user->phone_verification_required && !$user->phone_verified_at) {
+            $this->fail('Verifikasi nomor telepon sebelum mengajukan permohonan.',$technician?'profil-teknisi':'profil'); return;
+        }
+        $companies=array();
+        if ($technician) {
+            $tech=$this->db->get_where('technician_profiles',array('user_id'=>$user->id))->row();
+            if (!$tech || $tech->verification_status!=='approved') {
+                $this->fail('Akun teknisi perlu persetujuan dinas.','profil-teknisi'); return;
+            }
+            $companies=$this->metro->technician_companies($user->id);
+            if (!$companies) { $this->fail('Belum ada perusahaan yang terhubung dan disetujui.','pelimpahan'); return; }
+            $company_id=(int)($this->input->method()==='post'?$this->input->post('company_profile_id'):$this->input->get('company_id'));
+            if (!$company_id) $company_id=(int)$companies[0]->id;
+            if (!$this->metro->active_company_link($user->id,$company_id)) show_error('Hubungan perusahaan tidak aktif.',403);
+            $company=$this->db->get_where('applicant_profiles',array('id'=>$company_id))->row();
+            $profile=$company?$this->metro->profile($company->user_id):NULL;
+        } elseif ($staff) {
+            $applicant_id=(int)($this->input->method()==='post'?$this->input->post('applicant_profile_id'):$this->input->get('applicant_id'));
+            if (!$applicant_id) {
+                $query=trim((string)$this->input->get('q',TRUE));
+                $base=function() use ($query) {
+                    $this->db->from('applicant_profiles ap')->join('users u','u.id=ap.user_id')
+                        ->where('u.account_type','applicant')->where('u.account_status','active');
+                    if ($query!=='') $this->db->group_start()->like('u.full_name',$query)->or_like('u.email',$query)
+                        ->or_like('ap.organization_name',$query)->group_end();
+                    return $this->db;
+                };
+                $pagination=metro_page($base()->count_all_results(),$this->input->get('page'),20);
+                $profiles=$base()->select('ap.id,ap.organization_name,ap.address,u.full_name,u.phone,u.email')
+                    ->order_by('u.full_name')->order_by('ap.id')
+                    ->limit($pagination['per_page'],$pagination['offset'])->get()->result();
+                $this->page('staff/choose_applicant',array('title'=>'Input permohonan loket','profiles'=>$profiles,
+                    'query'=>$query,'pagination'=>$pagination));return;
+            }
+            $company=$this->db->select('ap.*,u.account_status')->from('applicant_profiles ap')
+                ->join('users u','u.id=ap.user_id')->where('ap.id',$applicant_id)
+                ->where('u.account_type','applicant')->get()->row();
+            if (!$company || $company->account_status!=='active') show_404();
+            $profile=$this->metro->profile($company->user_id);
+        } else $profile = $this->metro->profile($user->id);
+        if (!$profile || !$profile->address || !$this->master->profile_region($profile->district_id, $profile->village_id)) {
+            $this->fail('Lengkapi profil dan wilayah sebelum mengajukan.',$staff?'petugas/pemohon/'.$company->user_id:($technician?'pelimpahan':'profil')); return;
+        }
         $error = NULL;
         if ($this->input->method() === 'post') {
             try { $id = $this->save_request($user, $profile); redirect('permohonan/' . $id); return; }
             catch (RuntimeException $ex) { $error = $ex->getMessage(); }
         }
+        $locations = array();
+        foreach ($this->master->locations() as $location) $locations[$location->id] = $location;
+        $registered=$this->db->select('a.*,t.type_name AS uttp_name')->from('applicant_uttp a')
+            ->join('uttp_types t','t.id=a.uttp_type_id')->where('a.applicant_profile_id',$profile->id)
+            ->where('a.is_active',1)->order_by('a.id','DESC')->get()->result();
         $this->page('requests/create', array('title' => 'Ajukan layanan', 'types' => $this->metro->types(),
-            'profile' => $profile, 'error' => $error));
+            'service_types' => $this->master->options('service_type'), 'service_modes' => $this->master->options('service_mode'),
+            'locations' => $locations, 'profile' => $profile, 'registered'=>$registered,
+            'companies'=>$companies,'technician'=>$technician,'staff'=>$staff,
+            'profile_owner'=>$this->metro->user($profile->user_id),'error' => $error));
     }
 
     private function save_request($user, $profile)
     {
         $type_ids = $this->input->post('uttp_type_id');
-        $owners = $this->input->post('owner_name');
+        $owner = trim((string) $this->input->post('owner_name', TRUE));
         $brands = $this->input->post('brand');
         $types = $this->input->post('type_name');
-        $models = $this->input->post('model_name');
         $capacities = $this->input->post('capacity');
         $quantities = $this->input->post('quantity');
-        $valid_types = array_map('intval', array_column($this->metro->types(), 'id'));
-        if (!is_array($type_ids) || count($type_ids) < 1 || count($type_ids) > 20 || !is_array($quantities) || count($type_ids) !== count($quantities)) {
+        $registry_ids=$this->input->post('applicant_uttp_id');
+        $serials=$this->input->post('serial_number');
+        $item_addresses=$this->input->post('item_address');
+        $latitudes=$this->input->post('item_latitude');
+        $longitudes=$this->input->post('item_longitude');
+        $sources=$this->input->post('item_location_source');
+        $active_types = $this->metro->types();
+        $valid_types = array_map('intval', array_column($active_types, 'id'));
+        $mass_ids = array();
+        foreach ($active_types as $type) if ((int) $type->requires_capacity === 1) $mass_ids[] = (int) $type->id;
+        if (mb_strlen($owner) < 3 || mb_strlen($owner) > 190) throw new RuntimeException('Isi nama pemilik UTTP.');
+        if (!is_array($type_ids) || count($type_ids) < 1 || count($type_ids) > 20
+            || !is_array($quantities) || !is_array($brands) || !is_array($types)
+            || !is_array($capacities) || !is_array($registry_ids) || !is_array($serials)
+            || !is_array($item_addresses) || !is_array($latitudes)
+            || !is_array($longitudes) || !is_array($sources)
+            || count($type_ids) !== count($quantities) || count($type_ids) !== count($brands)
+            || count($type_ids) !== count($item_addresses)) {
             throw new RuntimeException('Tambahkan 1–20 jenis UTTP.');
         }
         $rows = array(); $unit_count = 0;
         foreach ($type_ids as $i => $type_id) {
             $quantity = filter_var($quantities[$i], FILTER_VALIDATE_INT, array('options' => array('min_range' => 1, 'max_range' => 100)));
-            $owner = trim((string) ($owners[$i] ?? ''));
             if (!in_array((int) $type_id, $valid_types, TRUE) || $quantity === FALSE || mb_strlen($owner) < 3 || mb_strlen($owner) > 190) {
                 throw new RuntimeException('Periksa jenis, nama pemilik, dan jumlah UTTP (1–100).');
             }
             $unit_count += $quantity;
             if ($unit_count > 100) throw new RuntimeException('Maksimal 100 unit dalam satu permohonan.');
+            $brand = trim((string) ($brands[$i] ?? ''));
+            if ($brand === '' || mb_strlen($brand) > 120) throw new RuntimeException('Merek UTTP wajib diisi (maksimal 120 karakter).');
+            $registry_id=(int)($registry_ids[$i] ?? 0);
+            if ($registry_id) {
+                $saved=$this->db->get_where('applicant_uttp',array('id'=>$registry_id,
+                    'applicant_profile_id'=>$profile->id,'is_active'=>1))->row();
+                if (!$saved || (int)$saved->uttp_type_id!==(int)$type_id)
+                    throw new RuntimeException('UTTP tersimpan tidak sesuai dengan perusahaan yang dipilih.');
+                if ($quantity!==1) throw new RuntimeException('UTTP tersimpan mewakili satu alat. Pilih satu unit atau tambahkan UTTP baru.');
+            }
+            $item_address=trim((string)($item_addresses[$i] ?? ''));
+            $coordinates=metro_coordinates($latitudes[$i] ?? '',$longitudes[$i] ?? '');
+            $source=(string)($sources[$i] ?? '');
+            $serial=trim((string)($serials[$i] ?? ''));
+            if (mb_strlen($item_address)<10 || mb_strlen($item_address)>2000 || $coordinates===FALSE
+                || ($coordinates && !in_array($source,array('','manual','map','google','google_review'),TRUE)) || mb_strlen($serial)>120)
+                throw new RuntimeException('Periksa alamat dan pasangan koordinat setiap UTTP.');
+            if ($quantity>1 && $serial!=='') throw new RuntimeException('Jumlah lebih dari satu harus memakai UTTP baru tanpa nomor seri bersama.');
             $rows[] = array('uttp_type_id' => (int) $type_id, 'owner_name' => $owner,
-                'brand' => mb_substr(trim((string) ($brands[$i] ?? '')), 0, 120),
+                'brand' => $brand,
                 'type_name' => mb_substr(trim((string) ($types[$i] ?? '')), 0, 120),
-                'model_name' => mb_substr(trim((string) ($models[$i] ?? '')), 0, 120),
-                'capacity' => mb_substr(trim((string) ($capacities[$i] ?? '')), 0, 120),
+                'capacity' => in_array((int) $type_id, $mass_ids, TRUE) ? mb_substr(trim((string) ($capacities[$i] ?? '')), 0, 120) : NULL,
+                'serial_number'=>$serial ?: NULL,'applicant_uttp_id'=>$registry_id ?: NULL,
+                'service_address'=>$item_address,
+                'latitude'=>$coordinates?$coordinates[0]:NULL,'longitude'=>$coordinates?$coordinates[1]:NULL,
+                'location_source'=>$coordinates?($source ?: 'manual'):NULL,
                 'quantity' => $quantity);
         }
-        $service_type = $this->input->post('service_type');
-        if (!in_array($service_type, array('tera', 'tera_ulang'), TRUE)) throw new RuntimeException('Pilih jenis layanan.');
+        $service_type = (string) $this->input->post('service_type', TRUE);
+        $service_mode = (string) $this->input->post('service_mode', TRUE);
+        if (!$this->master->option_code('service_type', $service_type)) throw new RuntimeException('Pilih jenis layanan.');
+        $mode = $this->master->option_code('service_mode', $service_mode);
+        if (!$mode) throw new RuntimeException('Pilih tempat pelayanan.');
+        $location = $mode->service_location_id ? $this->master->location($mode->service_location_id) : NULL;
+        if ($mode->service_location_id && !$location) throw new RuntimeException('Lokasi pelayanan belum aktif. Hubungi petugas.');
+        $address = $location ? $location->address : trim((string) $this->input->post('service_address', TRUE));
+        if (mb_strlen($address) < 10) throw new RuntimeException('Isi alamat pelayanan dengan lengkap.');
+        $region = $this->master->profile_region($profile->district_id, $profile->village_id);
+        if (!$region) throw new RuntimeException('Wilayah profil sudah berubah. Perbarui profil terlebih dahulu.');
+        $company_user=$this->metro->user($profile->user_id);
         $this->load->library('private_files');
-        $file = $this->private_files->save('application_letter');
+        $file = !empty($_FILES['application_letter']['name']) ? $this->private_files->save('application_letter') : NULL;
         $this->db->trans_begin();
         try {
+            if ($user->account_type==='technician') {
+                $link=$this->db->query('SELECT id FROM company_technicians WHERE technician_user_id=? AND company_profile_id=? AND status=? FOR UPDATE',
+                    array((int)$user->id,(int)$profile->id,'active'))->row();
+                if (!$link || !$this->metro->active_company_link($user->id,$profile->id))
+                    throw new RuntimeException('Pelimpahan tidak lagi aktif.');
+            }
             $year = (int) date('Y');
             $this->db->query('INSERT INTO number_sequences (sequence_code, sequence_year, last_value) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE last_value=last_value', array('REQUEST', $year));
             $sequence = $this->db->query('SELECT last_value FROM number_sequences WHERE sequence_code=? AND sequence_year=? FOR UPDATE', array('REQUEST', $year))->row();
@@ -69,33 +177,53 @@ class Requests extends MY_Controller
             $this->db->where('sequence_code', 'REQUEST')->where('sequence_year', $year)->update('number_sequences', array('last_value' => $next));
             $number = sprintf('%04d-%02d/%s', $next, $year % 100, date('d-m-Y'));
             $this->db->insert('service_requests', array('request_no' => $number, 'applicant_profile_id' => $profile->id,
+                'submitted_by_user_id'=>$user->id,
+                'submission_source'=>$this->metro->is_staff($user->id)?'counter':'online',
                 'service_type' => $service_type, 'request_status' => 'submitted',
-                'service_mode' => $this->input->post('service_mode') === 'field' ? 'field' : 'office',
-                'submitted_at' => date('Y-m-d H:i:s'), 'contact_name' => $profile->contact_person ?: $user->full_name,
-                'contact_phone' => $user->phone, 'service_address' => trim((string) $this->input->post('service_address', TRUE)) ?: $profile->address,
-                'district' => $profile->district, 'village' => $profile->village,
+                'service_mode' => $service_mode, 'service_location_id' => $location ? $location->id : NULL,
+                'submitted_at' => date('Y-m-d H:i:s'), 'contact_name' => $profile->contact_person ?: $company_user->full_name,
+                'contact_phone' => $company_user->phone, 'service_address' => $address,
+                'latitude'=>$profile->latitude,'longitude'=>$profile->longitude,
+                'district' => $region[0]->district_name, 'district_id' => $region[0]->id,
+                'village' => $region[1]->village_name, 'village_id' => $region[1]->id,
                 'applicant_note' => mb_substr(trim((string) $this->input->post('note', TRUE)), 0, 1000)));
             $request_id = $this->db->insert_id();
             $unit = 0;
-            foreach ($rows as $row) for ($j = 0; $j < $row['quantity']; $j++) {
+            foreach ($rows as $row) {
+                for ($j = 0; $j < $row['quantity']; $j++) {
                 $unit++;
                 $item = $row; unset($item['quantity']);
+                if (!$item['applicant_uttp_id']) {
+                    $this->db->insert('applicant_uttp',array('applicant_profile_id'=>$profile->id,
+                        'uttp_type_id'=>$row['uttp_type_id'],'owner_name'=>$row['owner_name'],
+                        'brand'=>$row['brand'],'type_name'=>$row['type_name'],'capacity'=>$row['capacity'],
+                        'serial_number'=>$row['serial_number'],'service_address'=>$row['service_address'],
+                        'latitude'=>$row['latitude'],'longitude'=>$row['longitude'],
+                        'location_source'=>$row['location_source']));
+                    $item['applicant_uttp_id']=$this->db->insert_id();
+                }
                 $item['service_request_id'] = $request_id; $item['unit_sequence'] = $unit; $item['item_status'] = 'submitted';
                 $this->db->insert('request_items', $item);
                 $this->db->insert('item_status_history', array('request_item_id' => $this->db->insert_id(), 'to_status' => 'submitted',
                     'actor_user_id' => $user->id, 'note' => 'Permohonan dikirim'));
+                }
             }
             $this->db->insert('request_status_history', array('service_request_id' => $request_id,
                 'to_status' => 'submitted', 'actor_user_id' => $user->id, 'note' => 'Permohonan dikirim'));
-            $file['service_request_id'] = $request_id; $file['document_type'] = 'application_letter';
-            $file['visibility'] = 'applicant'; $file['uploaded_by'] = $user->id;
-            $this->db->insert('service_documents', $file);
+            if ($file) {
+                $file['service_request_id'] = $request_id; $file['document_type'] = 'application_letter';
+                $file['visibility'] = 'applicant'; $file['uploaded_by'] = $user->id;
+                $this->db->insert('service_documents', $file);
+            }
             $this->metro->audit($user->id, 'request_submit', 'service_requests', $request_id, $number);
+            if ((int)$profile->user_id!==(int)$user->id)
+                $this->metro->notify($profile->user_id,$user->account_type==='staff'?'Permohonan loket':'Permohonan oleh teknisi',
+                    ($user->account_type==='staff'?'Petugas loket':'Teknisi').' mengirim permohonan '.$number.' atas nama Anda.','permohonan/'.$request_id);
             if ($this->db->trans_status() === FALSE) throw new RuntimeException('Penyimpanan permohonan gagal.');
             $this->db->trans_commit();
             return $request_id;
         } catch (Exception $ex) {
-            $this->db->trans_rollback(); $this->private_files->delete($file['storage_key']);
+            $this->db->trans_rollback(); if ($file) $this->private_files->delete($file['storage_key']);
             throw new RuntimeException('Penyimpanan permohonan gagal. Coba lagi.');
         }
     }
@@ -104,7 +232,12 @@ class Requests extends MY_Controller
     {
         $user = $this->require_login();
         $request = $this->metro->request((int) $id);
-        if (!$request || ((int) $request->user_id !== (int) $user->id && !$this->metro->is_staff($user->id))) show_404();
+        if (!$request || (!$this->metro->can_access_request($user,$request)
+            && !$this->metro->can_view_request($user->id,$request->id))) show_404();
+        if ($this->metro->is_staff($user->id)) {
+            redirect('petugas/permohonan/'.$request->id);
+            return;
+        }
         $docs = array_filter($this->metro->documents($request->id), function ($d) use ($user) {
             return $d->visibility === 'applicant' || $this->metro->is_staff($user->id);
         });
@@ -113,6 +246,7 @@ class Requests extends MY_Controller
         foreach ($items as $item) if ($item->item_status === 'revision') $needs_revision = TRUE;
         $this->page('requests/show', array('title' => 'Permohonan ' . $request->request_no, 'request' => $request,
             'items' => $items, 'needs_revision' => $needs_revision, 'documents' => $docs,
+            'can_revise'=>$this->metro->can_access_request($user,$request),
             'history' => $this->metro->history($request->id),
             'feedback' => $this->db->get_where('service_feedback', array('service_request_id' => $request->id))->row()));
     }
@@ -121,12 +255,15 @@ class Requests extends MY_Controller
     {
         $user = $this->require_login();
         $request = $this->metro->request((int) $id);
-        if (!$request || ((int) $request->user_id !== (int) $user->id && !$this->metro->is_staff($user->id))) show_404();
+        if (!$request || (!$this->metro->can_access_request($user,$request)
+            && !$this->metro->can_view_request($user->id,$request->id))) show_404();
+        if (!$this->metro->can_access_request($user,$request) && !$this->metro->can($user->id,'requests.view_all'))
+            show_error('Akses ditolak.',403);
         require_once FCPATH . 'vendor/autoload.php';
         $html = $this->load->view('requests/receipt', array('request' => $request, 'items' => $this->metro->items($request->id)), TRUE);
         $pdf = new Dompdf\Dompdf();
         $pdf->loadHtml($html); $pdf->setPaper('A4'); $pdf->render();
-        $this->output->set_content_type('application/pdf')->set_header('Content-Disposition: attachment; filename="bukti-' . $request->id . '.pdf"')
+        $this->output->set_content_type('application/pdf')->set_header('Content-Disposition: '.($this->input->get('download')==='1'?'attachment':'inline').'; filename="bukti-' . $request->id . '.pdf"')
             ->set_output($pdf->output());
     }
 
@@ -136,7 +273,7 @@ class Requests extends MY_Controller
         $user = $this->require_login();
         $request = $this->metro->request((int) $id);
         if (!$request || (int) $request->user_id !== (int) $user->id) show_404();
-        $done = $this->db->where('service_request_id', $request->id)->where('item_status !=', 'completed')->count_all_results('request_items') === 0;
+        $done = $this->db->where('service_request_id', $request->id)->where_not_in('item_status',metro_terminal_statuses())->count_all_results('request_items') === 0;
         if (!$done) show_error('Umpan balik tersedia setelah semua unit selesai.', 400);
         $rating = filter_var($this->input->post('rating'), FILTER_VALIDATE_INT, array('options' => array('min_range' => 1, 'max_range' => 5)));
         if (!$rating) { $this->fail('Pilih nilai 1–5.', 'permohonan/' . $id); return; }
@@ -151,7 +288,7 @@ class Requests extends MY_Controller
         $this->post_only();
         $user = $this->require_login();
         $request = $this->metro->request((int) $id);
-        if (!$request || (int) $request->user_id !== (int) $user->id ||
+        if (!$request || !$this->metro->can_access_request($user,$request) ||
             $this->db->where('service_request_id', $request->id)->where('item_status', 'revision')->count_all_results('request_items') === 0) show_error('Perbaikan tidak tersedia.', 403);
         $this->load->library('private_files');
         try { $file = $this->private_files->save('application_letter'); }

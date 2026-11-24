@@ -16,6 +16,8 @@ user_guide_src/cilexer/build/*
 user_guide_src/cilexer/dist/*
 user_guide_src/cilexer/pycilexer.egg-info/*
 /vendor/
+/wa-engine/node_modules/
+/wa-engine/auth_info/
 
 # IDE Files
 #-------------------------
@@ -32,3 +34,9 @@ user_guide_src/cilexer/pycilexer.egg-info/*
 /tests/results/
 /docs/AKSES_ADMIN.md
 /.user.ini
+
+# Local database backups
+/database/*_dump_*.sql
+
+# Local source archive
+/docs/source/SKHP 2025.zip
