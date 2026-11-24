@@ -18,10 +18,10 @@ class Technicians extends MY_Controller
             show_error('Atur profil sebagai instansi/perusahaan terlebih dahulu.',400);
         return array($user,$profile);
     }
-    private function office()
+    private function office($permission='technicians.view')
     {
         $user=$this->require_staff();
-        if (!$this->metro->can($user->id,'technicians.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($user->id,$permission)) show_error('Akses ditolak.',403);
         return $user;
     }
     public function profile()
@@ -151,7 +151,7 @@ class Technicians extends MY_Controller
     }
     public function review_technician($id)
     {
-        $this->post_only();$actor=$this->office();
+        $this->post_only();$actor=$this->office('technicians.verify');
         $row=$this->db->select('tp.*,u.phone_verified_at,u.account_status')->from('technician_profiles tp')
             ->join('users u','u.id=tp.user_id')->where('tp.user_id',(int)$id)->get()->row();
         if (!$row) show_404();
@@ -173,7 +173,7 @@ class Technicians extends MY_Controller
     }
     public function review_connection($id)
     {
-        $this->post_only();$actor=$this->office();
+        $this->post_only();$actor=$this->office('technicians.delegation_review');
         $row=$this->db->select('ct.*,ap.user_id AS company_user_id,ap.profile_kind,tp.verification_status,tu.phone_verified_at,tu.account_status AS technician_status,cu.account_status AS company_status')
             ->from('company_technicians ct')->join('applicant_profiles ap','ap.id=ct.company_profile_id')
             ->join('technician_profiles tp','tp.user_id=ct.technician_user_id')

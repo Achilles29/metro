@@ -3,11 +3,16 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 class Masters extends MY_Controller
 {
-    private function admin()
+    private function admin($permission='masters.view')
     {
         $actor = $this->require_staff();
-        if (!$this->metro->can($actor->id,'masters.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,$permission)) show_error('Akses ditolak.',403);
         return $actor;
+    }
+
+    private function require_write($actor,$id)
+    {
+        if (!$this->metro->can($actor->id,$id?'masters.update':'masters.create')) show_error('Akses ditolak.',403);
     }
 
     private function integer($name, $default = 0)
@@ -35,7 +40,7 @@ class Masters extends MY_Controller
 
     public function toggle($kind, $id)
     {
-        $this->post_only(); $actor=$this->admin(); $id=(int)$id;
+        $this->post_only(); $actor=$this->admin('masters.status'); $id=(int)$id;
         $map=array('uttp'=>array('uttp_types','petugas/master/uttp'),
             'kecamatan'=>array('master_districts','petugas/master/kecamatan'),
             'desa'=>array('master_villages','petugas/master/desa'),
@@ -65,7 +70,7 @@ class Masters extends MY_Controller
 
     public function toggle_option($group_code, $id)
     {
-        $this->post_only(); $actor=$this->admin(); $id=(int)$id;
+        $this->post_only(); $actor=$this->admin('masters.status'); $id=(int)$id;
         $group=$this->master->group($group_code);
         $row=$group ? $this->master->option($group_code,$id,FALSE) : NULL;
         if (!$row) show_404();
@@ -83,11 +88,11 @@ class Masters extends MY_Controller
 
     public function toggle_role($id)
     {
-        $this->post_only(); $actor=$this->admin(); $id=(int)$id;
+        $this->post_only(); $actor=$this->admin('masters.status'); $id=(int)$id;
         $url='petugas/master/peran';
         $row=$this->db->get_where('roles',array('id'=>$id))->row();
         if (!$row) show_404();
-        if (in_array($row->role_code,array('administrator','applicant'),TRUE)) {
+        if (in_array($row->role_code,array('administrator','applicant','business_actor','external_technician'),TRUE)) {
             $this->fail('Peran inti harus tetap aktif.',$url); return;
         }
         $active=(int)!$row->is_active;
@@ -98,7 +103,7 @@ class Masters extends MY_Controller
 
     public function delete($kind, $id)
     {
-        $this->post_only(); $actor=$this->admin(); $id=(int)$id;
+        $this->post_only(); $actor=$this->admin('masters.delete'); $id=(int)$id;
         $map=array(
             'uttp'=>array('uttp_types','petugas/master/uttp',array(array('request_items','uttp_type_id'),array('applicant_uttp','uttp_type_id'))),
             'kecamatan'=>array('master_districts','petugas/master/kecamatan',array(array('master_villages','district_id'),array('master_locations','district_id'),array('applicant_profiles','district_id'),array('service_requests','district_id'))),
@@ -125,7 +130,7 @@ class Masters extends MY_Controller
 
     public function delete_option($group_code, $id)
     {
-        $this->post_only(); $actor=$this->admin(); $id=(int)$id;
+        $this->post_only(); $actor=$this->admin('masters.delete'); $id=(int)$id;
         $group=$this->master->group($group_code);
         $row=$group ? $this->master->option($group_code,$id,FALSE) : NULL;
         if (!$row) show_404();
@@ -179,6 +184,7 @@ class Masters extends MY_Controller
         $url = 'petugas/master/pilihan/'.$group_code;
         if ($this->input->method() === 'post') {
             $id = (int) $this->input->post('id');
+            $this->require_write($actor,$id);
             $existing = $id ? $this->master->option($group_code, $id, FALSE) : NULL;
             if ($id && !$existing) show_404();
             if (!$id && !$group->allow_create) { $this->fail('Kelompok ini hanya mengizinkan perubahan label data yang sudah ada.', $url); return; }
@@ -251,7 +257,7 @@ class Masters extends MY_Controller
 
     public function ctt_history($id)
     {
-        $this->require_permission('masters.manage');
+        $this->require_permission('masters.view');
         $option=$this->master->option('ctt',(int)$id,FALSE);
         if (!$option) show_404();
         $base=function() use ($option) { return $this->db->from('request_ctt_daily_loans dl')
@@ -271,6 +277,7 @@ class Masters extends MY_Controller
         $actor = $this->admin(); $url = 'petugas/master/uttp';
         if ($this->input->method() === 'post') {
             $id = (int) $this->input->post('id');
+            $this->require_write($actor,$id);
             $existing = $id ? $this->db->get_where('uttp_types',array('id'=>$id))->row() : NULL;
             if ($id && !$existing) show_404();
             $code = $existing ? $existing->type_code : strtoupper(trim((string) $this->input->post('type_code',TRUE)));
@@ -301,7 +308,7 @@ class Masters extends MY_Controller
     {
         $actor = $this->admin(); $url = 'petugas/master/kecamatan';
         if ($this->input->method() === 'post') {
-            $id=(int)$this->input->post('id'); $existing=$id?$this->master->district($id,FALSE):NULL;
+            $id=(int)$this->input->post('id'); $this->require_write($actor,$id); $existing=$id?$this->master->district($id,FALSE):NULL;
             if ($id && !$existing) show_404();
             $code=$existing?$existing->district_code:trim((string)$this->input->post('district_code',TRUE));
             $name=trim((string)$this->input->post('district_name',TRUE));
@@ -326,7 +333,7 @@ class Masters extends MY_Controller
     {
         $actor = $this->admin(); $url = 'petugas/master/desa';
         if ($this->input->method() === 'post') {
-            $id=(int)$this->input->post('id'); $existing=$id?$this->master->village($id,FALSE):NULL;
+            $id=(int)$this->input->post('id'); $this->require_write($actor,$id); $existing=$id?$this->master->village($id,FALSE):NULL;
             if ($id && !$existing) show_404();
             $district_id=(int)$this->input->post('district_id');
             $district=$this->master->district($district_id,FALSE);
@@ -362,7 +369,7 @@ class Masters extends MY_Controller
     {
         $actor = $this->admin(); $url = 'petugas/master/lokasi';
         if ($this->input->method() === 'post') {
-            $id=(int)$this->input->post('id');$existing=$id?$this->master->location($id,FALSE):NULL;
+            $id=(int)$this->input->post('id');$this->require_write($actor,$id);$existing=$id?$this->master->location($id,FALSE):NULL;
             if ($id && !$existing) show_404();
             $code=$existing?$existing->location_code:strtoupper(trim((string)$this->input->post('location_code',TRUE)));
             $name=trim((string)$this->input->post('location_name',TRUE));
@@ -397,13 +404,13 @@ class Masters extends MY_Controller
     {
         $actor = $this->admin(); $url='petugas/master/peran';
         if ($this->input->method() === 'post') {
-            $id=(int)$this->input->post('id');$row=$this->db->get_where('roles',array('id'=>$id))->row();
+            $id=(int)$this->input->post('id');$this->require_write($actor,$id);$row=$this->db->get_where('roles',array('id'=>$id))->row();
             if (!$row) show_404();
             $name=trim((string)$this->input->post('role_name',TRUE));
             $description=trim((string)$this->input->post('description',TRUE));
             $active=$this->input->post('is_active')?1:0;
             if (mb_strlen($name)<3 || mb_strlen($name)>100 || mb_strlen($description)>255) { $this->fail('Periksa nama dan deskripsi peran.',$url); return; }
-            if (in_array($row->role_code,array('administrator','applicant'),TRUE)) $active=1;
+            if (in_array($row->role_code,array('administrator','applicant','business_actor','external_technician'),TRUE)) $active=1;
             $this->db->where('id',$id)->update('roles',array('role_name'=>$name,'description'=>$description?:NULL,
                 'sort_order'=>$this->integer('sort_order'),'is_active'=>$active));
             $this->saved($actor,'roles',$id,$url);

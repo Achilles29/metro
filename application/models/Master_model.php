@@ -95,7 +95,7 @@ class Master_model extends CI_Model
 
     public function staff_roles($active_only = TRUE)
     {
-        $this->db->where_not_in('role_code',array('applicant','administrator','external_technician'));
+        $this->db->where_not_in('role_code',array('applicant','business_actor','administrator','external_technician'));
         if ($active_only) $this->db->where('is_active', 1);
         return $this->db->order_by('sort_order')->order_by('role_name')->get('roles')->result();
     }

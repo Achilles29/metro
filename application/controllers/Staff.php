@@ -52,7 +52,7 @@ class Staff extends MY_Controller
 
     public function applicants()
     {
-        $user = $this->require_permission('applicants.manage');
+        $user = $this->require_permission('applicants.view');
         $query = mb_substr(trim((string) $this->input->get('q', TRUE)), 0, 100);
         $pagination = metro_page($this->metro->applicants_count($query), $this->input->get('page'), 20);
         $this->page('staff/applicants', array('title' => 'Data pemohon',
@@ -95,7 +95,7 @@ class Staff extends MY_Controller
     public function create_applicant()
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'applicants.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'applicants.create')) show_error('Akses ditolak.',403);
         $values=$this->applicant_input();
         if (!$values) { $this->fail('Periksa identitas, wilayah, alamat, dan pastikan email/telepon belum digunakan.','petugas/pemohon'); return; }
         $role=$this->db->get_where('roles',array('role_code'=>'applicant'))->row();
@@ -119,7 +119,7 @@ class Staff extends MY_Controller
     public function update_applicant($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'applicants.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'applicants.update')) show_error('Akses ditolak.',403);
         $person=$this->metro->user((int)$id);
         if (!$person || $person->account_type!=='applicant') show_404();
         $profile=$this->metro->profile($person->id);
@@ -147,7 +147,7 @@ class Staff extends MY_Controller
     public function toggle_applicant($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'applicants.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'applicants.status')) show_error('Akses ditolak.',403);
         $person=$this->metro->user((int)$id);
         if (!$person || $person->account_type!=='applicant') show_404();
         $status=$person->account_status==='active'?'inactive':'active';
@@ -159,7 +159,7 @@ class Staff extends MY_Controller
     public function delete_applicant($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'applicants.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'applicants.delete')) show_error('Akses ditolak.',403);
         $person=$this->metro->user((int)$id);
         if (!$person || $person->account_type!=='applicant') show_404();
         $profile=$this->metro->profile($person->id); $url='petugas/pemohon';
@@ -376,7 +376,7 @@ class Staff extends MY_Controller
 
     public function applicant($id)
     {
-        $user = $this->require_permission('applicants.manage');
+        $user = $this->require_permission('applicants.view');
         $person = $this->metro->user((int) $id);
         if (!$person || $person->account_type !== 'applicant') show_404();
         $profile = $this->metro->profile($person->id);
@@ -682,16 +682,17 @@ class Staff extends MY_Controller
     public function users()
     {
         $actor = $this->require_staff();
-        if (!$this->metro->can($actor->id,'staff.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'staff.view')) show_error('Akses ditolak.',403);
         $error = NULL;
         if ($this->input->method() === 'post') {
+            if (!$this->metro->can($actor->id,'staff.create')) show_error('Akses ditolak.',403);
             $name = trim((string) $this->input->post('full_name', TRUE));
             $email = strtolower(trim((string) $this->input->post('email', TRUE)));
             $password = (string) $this->input->post('password');
             $role_code = (string) $this->input->post('role_code', TRUE);
             $role = $this->db->get_where('roles', array('role_code' => $role_code, 'is_active' => 1))->row();
             if (mb_strlen($name) < 3 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8 || strlen($password) > 72
-                || !$role || in_array($role_code, array('administrator','applicant'), TRUE)) $error = 'Periksa nama, email, peran, dan kata sandi 8–72 karakter.';
+                || !$role || in_array($role_code, array('administrator','applicant','business_actor','external_technician'), TRUE)) $error = 'Periksa nama, email, peran, dan kata sandi 8–72 karakter.';
             elseif ($this->metro->user_by_email($email)) $error = 'Email sudah digunakan.';
             else {
                 $this->db->trans_begin();
@@ -717,7 +718,7 @@ class Staff extends MY_Controller
     public function update_user($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'staff.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'staff.update')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
         $name=trim((string)$this->input->post('full_name',TRUE));
@@ -730,7 +731,7 @@ class Staff extends MY_Controller
         $role=$role_code ? $this->db->get_where('roles',array('role_code'=>$role_code,'is_active'=>1))->row() : NULL;
         if (mb_strlen($name)<3 || mb_strlen($name)>160 || !filter_var($email,FILTER_VALIDATE_EMAIL)
             || ($password!=='' && (strlen($password)<8 || strlen($password)>72))
-            || (!$is_admin && (!$role || in_array($role_code,array('administrator','applicant'),TRUE) || count($roles)!==1))) {
+            || (!$is_admin && (!$role || in_array($role_code,array('administrator','applicant','business_actor','external_technician'),TRUE) || count($roles)!==1))) {
             $this->fail('Periksa nama, email, peran, dan kata sandi (jika diubah).','petugas/akun'); return;
         }
         if ($this->db->where('email',$email)->where('id !=',$target->id)->count_all_results('users')) {
@@ -753,7 +754,7 @@ class Staff extends MY_Controller
     public function toggle_user($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'staff.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'staff.status')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
         if ($target->id==$actor->id || $this->metro->has_role($target->id,array('administrator'))) {
@@ -768,7 +769,7 @@ class Staff extends MY_Controller
     public function delete_user($id)
     {
         $this->post_only(); $actor=$this->require_staff();
-        if (!$this->metro->can($actor->id,'staff.manage')) show_error('Akses ditolak.',403);
+        if (!$this->metro->can($actor->id,'staff.delete')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
         $url='petugas/akun';
@@ -797,7 +798,7 @@ class Staff extends MY_Controller
     {
         $this->post_only();
         $actor = $this->require_staff();
-        if (!$this->metro->can($actor->id,'staff.manage') || (int) $id === (int) $actor->id) show_error('Akses ditolak.', 403);
+        if (!$this->metro->can($actor->id,'staff.status') || (int) $id === (int) $actor->id) show_error('Akses ditolak.', 403);
         $target = $this->metro->user((int) $id);
         if (!$target || $target->account_type !== 'staff') show_404();
         if ($this->metro->has_role($target->id,array('administrator'))) show_error('Akses ditolak.',403);

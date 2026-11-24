@@ -6,7 +6,7 @@ class Geo extends MY_Controller
     public function index()
     {
         $user=$this->require_staff();
-        if (!$this->metro->can($user->id,'applicants.manage') && !$this->metro->can($user->id,'requests.view_all'))
+        if (!$this->metro->can($user->id,'applicants.view') && !$this->metro->can($user->id,'requests.view_all'))
             show_error('Akses ditolak.',403);
         $district=(int)$this->input->get('district_id');
         $profiles=$this->db->select('p.id,p.user_id,p.organization_name,p.latitude,p.longitude,p.location_source,p.address,u.full_name,d.district_name')

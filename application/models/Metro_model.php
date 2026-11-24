@@ -24,7 +24,16 @@ class Metro_model extends CI_Model
         if (isset($this->role_cache[$user_id])) return $this->role_cache[$user_id];
         $rows = $this->db->select('r.role_code')->from('user_roles ur')->join('roles r', 'r.id=ur.role_id')
             ->where('ur.user_id', $user_id)->get()->result();
-        return $this->role_cache[$user_id] = array_map(function ($r) { return $r->role_code; }, $rows);
+        $codes=array_map(function ($r) { return $r->role_code; }, $rows);
+        $account=$this->db->select('account_type')->get_where('users',array('id'=>(int)$user_id))->row();
+        if ($account && $account->account_type==='applicant') {
+            $profile=$this->db->select('profile_kind')->get_where('applicant_profiles',array('user_id'=>(int)$user_id))->row();
+            if ($profile && $profile->profile_kind==='organization') {
+                $codes=array_values(array_diff($codes,array('applicant')));
+                $codes[]='business_actor';
+            }
+        }
+        return $this->role_cache[$user_id] = array_values(array_unique($codes));
     }
     public function has_role($user_id, $codes) { return count(array_intersect($this->roles($user_id), $codes)) > 0; }
     public function active_company_link($technician_id,$profile_id)
@@ -86,15 +95,16 @@ class Metro_model extends CI_Model
     {
         if (isset($this->permission_cache[$user_id])) return $this->permission_cache[$user_id];
         if ($this->has_role($user_id,array('administrator'))) return $this->permission_cache[$user_id] = array('*');
-        $rows=$this->db->distinct()->select('p.permission_code')->from('user_roles ur')
-            ->join('role_permissions rp','rp.role_id=ur.role_id')
+        $roles=$this->roles($user_id);
+        if (!$roles) return $this->permission_cache[$user_id]=array();
+        $rows=$this->db->distinct()->select('p.permission_code')->from('roles r')
+            ->join('role_permissions rp','rp.role_id=r.id')
             ->join('permissions p','p.id=rp.permission_id')
-            ->where('ur.user_id',$user_id)->get()->result();
+            ->where_in('r.role_code',$roles)->get()->result();
         return $this->permission_cache[$user_id] = array_map(function($r){return $r->permission_code;},$rows);
     }
     public function can($user_id, $permission)
     {
-        if ($permission==='staff.manage') return $this->has_role($user_id,array('administrator'));
         $permissions=$this->permissions_for($user_id);
         return in_array('*',$permissions,TRUE) || in_array($permission,$permissions,TRUE);
     }

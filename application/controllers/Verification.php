@@ -269,14 +269,14 @@ class Verification extends MY_Controller
 
     public function criteria()
     {
-        $this->require_permission('masters.manage');
+        $this->require_permission('masters.view');
         $rows=$this->db->order_by('sort_order')->order_by('id')->get('verification_checks')->result();
         $this->page('staff/master/verification',array('title'=>'Master kaji ulang','rows'=>$rows));
     }
 
     public function save_criteria($id=0)
     {
-        $this->post_only();$actor=$this->require_permission('masters.manage');
+        $this->post_only();$actor=$this->require_permission($id?'masters.update':'masters.create');
         $row=$id?$this->db->get_where('verification_checks',array('id'=>(int)$id))->row():NULL;
         if ($id && !$row) show_404();
         $label=trim((string)$this->input->post('label',TRUE));
@@ -293,7 +293,7 @@ class Verification extends MY_Controller
 
     public function toggle_criteria($id)
     {
-        $this->post_only();$actor=$this->require_permission('masters.manage');
+        $this->post_only();$actor=$this->require_permission('masters.status');
         $row=$this->db->get_where('verification_checks',array('id'=>(int)$id))->row();if (!$row) show_404();
         $this->db->where('id',$row->id)->update('verification_checks',array('is_active'=>(int)!$row->is_active));
         $this->metro->audit($actor->id,'verification_master_toggle','verification_checks',$row->id);
