@@ -2,5 +2,6 @@
 <form method="post" action="<?= site_url('login') ?>"><?= form_hidden($this->security->get_csrf_token_name(), $this->security->get_csrf_hash()) ?>
 <label>Email atau ID masuk<input type="text" name="email" autocomplete="username" autocapitalize="none" spellcheck="false" required value="<?= e($this->input->post('email', TRUE)) ?>"></label>
 <label>Kata sandi<input type="password" name="password" autocomplete="current-password" required></label>
+<label class="remember-choice"><input type="checkbox" name="remember_me" value="1"<?= $this->input->post('remember_me')==='1'?' checked':'' ?>> Ingat saya selama 30 hari</label>
 <button class="button primary full" type="submit">Masuk</button></form>
 <p class="muted small">Belum punya akun? <a href="<?= site_url('register') ?>">Daftar sebagai pemohon</a>.</p></div></div>

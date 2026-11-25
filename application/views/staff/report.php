@@ -2,7 +2,7 @@
 $request_counts=array();
 foreach ($service_types as $service_type) $request_counts[$service_type->option_code]=0;
 foreach ($report['requests'] as $row) $request_counts[$row->service_type]=(int)$row->total;
-$total_requests=array_sum($request_counts);
+$total_requests=(int)$report['total_requests'];
 $total_units=0;
 foreach ($report['items'] as $row) $total_units+=(int)$row->total;
 ?>

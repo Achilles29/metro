@@ -28,29 +28,29 @@ if ($this->metro->can($current_user->id,'activity.view')) $menu[] = array('key'=
 if ($this->metro->can($current_user->id,'reports.view')) $menu[] = array('key'=>'report','url'=>'petugas/laporan','label'=>'Laporan layanan','icon'=>'chart');
 if ($this->metro->can($current_user->id,'reports.view') && $this->metro->can($current_user->id,'requests.view_all') && $this->metro->can($current_user->id,'requests.view'))
     $menu[] = array('key'=>'gallery','url'=>'petugas/galeri-laporan','label'=>'Galeri laporan','icon'=>'gallery');
-if ($this->metro->can($current_user->id,'applicants.manage')) $menu[] = array('key'=>'applicants','url'=>'petugas/pemohon','label'=>'Data pemohon','icon'=>'person');
-if ($this->metro->can($current_user->id,'applicants.manage') || $this->metro->can($current_user->id,'requests.view_all')) $menu[] = array('key'=>'map','url'=>'petugas/peta','label'=>'Peta GIS','icon'=>'chart');
-if ($this->metro->can($current_user->id,'masters.manage')) $menu[] = array('key'=>'master','url'=>'petugas/master','label'=>'Master data','icon'=>'database');
+if ($this->metro->can($current_user->id,'applicants.view')) $menu[] = array('key'=>'applicants','url'=>'petugas/pemohon','label'=>'Data pemohon','icon'=>'person');
+if ($this->metro->can($current_user->id,'applicants.view') || $this->metro->can($current_user->id,'requests.view_all')) $menu[] = array('key'=>'map','url'=>'petugas/peta','label'=>'Peta GIS','icon'=>'chart');
+if ($this->metro->can($current_user->id,'masters.view')) $menu[] = array('key'=>'master','url'=>'petugas/master','label'=>'Master data','icon'=>'database');
 $master_menu = array(array('url'=>'petugas/master','label'=>'Ringkasan'),array('url'=>'petugas/master/verifikasi','label'=>'Unsur kaji ulang'),array('url'=>'petugas/master/uttp','label'=>'Jenis UTTP'),
     array('url'=>'petugas/master/kecamatan','label'=>'Kecamatan'),array('url'=>'petugas/master/desa','label'=>'Desa / kelurahan'),
     array('url'=>'petugas/master/lokasi','label'=>'Lokasi dan alamat'),array('url'=>'petugas/master/peran','label'=>'Peran pengguna'));
-if ($this->metro->can($current_user->id,'masters.manage')) foreach ($this->master->groups() as $master_group)
+if ($this->metro->can($current_user->id,'masters.view')) foreach ($this->master->groups() as $master_group)
     $master_menu[] = array('url'=>'petugas/master/pilihan/'.$master_group->group_code,'label'=>$master_group->group_name);
-if ($this->metro->can($current_user->id,'staff.manage')) $menu[] = array('key'=>'users','url'=>'petugas/akun','label'=>'Akun petugas','icon'=>'users');
-if ($this->metro->can($current_user->id,'technicians.manage')) $menu[] = array('key'=>'technicians','url'=>'petugas/teknisi','label'=>'Teknisi eksternal','icon'=>'users');
+if ($this->metro->can($current_user->id,'staff.view')) $menu[] = array('key'=>'users','url'=>'petugas/akun','label'=>'Akun petugas','icon'=>'users');
+if ($this->metro->can($current_user->id,'technicians.view')) $menu[] = array('key'=>'technicians','url'=>'petugas/teknisi','label'=>'Pelaku usaha','icon'=>'users');
 if (in_array('administrator',$roles,TRUE)) $menu[] = array('key'=>'permissions','url'=>'petugas/hak-akses','label'=>'Hak akses','icon'=>'lock');
 if (in_array('administrator',$roles,TRUE)) $menu[] = array('key'=>'whatsapp','url'=>'petugas/whatsapp','label'=>'WhatsApp','icon'=>'message');
 if (in_array('administrator',$roles,TRUE)) $menu[] = array('key'=>'integrations','url'=>'petugas/integrasi','label'=>'Integrasi Google','icon'=>'external');
 ?>
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($title ?? 'Ruang kerja') ?> · Setimbang Rembang</title>
-<link rel="icon" type="image/png" sizes="32x32" href="<?= base_url('assets/favicon-rembang-32.png?v=2') ?>"><link rel="shortcut icon" href="<?= base_url('assets/favicon-rembang-v2.ico?v=2') ?>"><link rel="apple-touch-icon" sizes="180x180" href="<?= base_url('assets/favicon-rembang-180.png?v=2') ?>"><link rel="stylesheet" href="<?= base_url('assets/metro.css?v=4') ?>"><link rel="stylesheet" href="<?= base_url('assets/revisi.css?v=5') ?>"><link rel="stylesheet" href="<?= base_url('assets/admin.css?v=20') ?>">
+<link rel="icon" type="image/png" sizes="32x32" href="<?= base_url('assets/favicon-rembang-32.png?v=2') ?>"><link rel="shortcut icon" href="<?= base_url('assets/favicon-rembang-v2.ico?v=2') ?>"><link rel="apple-touch-icon" sizes="180x180" href="<?= base_url('assets/favicon-rembang-180.png?v=2') ?>"><link rel="stylesheet" href="<?= base_url('assets/metro.css?v=5') ?>"><link rel="stylesheet" href="<?= base_url('assets/revisi.css?v=6') ?>"><link rel="stylesheet" href="<?= base_url('assets/admin.css?v=20') ?>"><link rel="stylesheet" href="<?= base_url('assets/task-revisions.css?v=5') ?>">
 <script src="<?= base_url('assets/admin.js?v=5') ?>" defer></script><script src="<?= base_url('assets/revisi.js') ?>" defer></script></head>
 <body class="admin-body">
 <div class="admin-shell">
 <button class="sidebar-backdrop" type="button" data-sidebar-close aria-label="Tutup menu"></button>
 <aside class="admin-sidebar" id="admin-sidebar" aria-label="Navigasi petugas">
-<a class="admin-brand" href="<?= site_url('petugas') ?>"><img class="admin-brand-logo" src="<?= base_url('assets/logo-rembang-transparan.png?v=2') ?>" alt="Logo Kabupaten Rembang"><span><strong>Setimbang</strong><small>METROLOGI LEGAL</small></span></a>
+<a class="admin-brand" href="<?= site_url('petugas') ?>"><span class="brand-marks"><img class="admin-brand-logo" src="<?= base_url('assets/logo-rembang-transparan.png?v=2') ?>" alt="Logo Kabupaten Rembang"><img class="admin-brand-logo brand-logo-metrology" src="<?= base_url('assets/logo-metrologi.png?v=1') ?>" alt="Logo Metrologi Legal"></span><span class="brand-copy"><strong>Setimbang</strong><small>Sistem pendaftaran tera dan informasi pengawasan Kabupaten Rembang</small><small>UPT Metrologi Legal Kabupaten Rembang</small></span></a>
 <div class="admin-sidebar-caption">RUANG KERJA</div>
 <nav class="admin-nav" aria-label="Menu utama">
 <?php foreach ($menu as $item): ?><?php if ($item['key']==='master'): ?>

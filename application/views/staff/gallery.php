@@ -21,12 +21,13 @@
           <?php foreach ($photos[(int)$order->id] ?? array() as $photo): ?><article class="gallery-photo">
             <?php if ($can_download): ?><label class="gallery-photo-choice"><input type="checkbox" name="photo_ids[]" value="<?= (int)$photo->id ?>" aria-label="Pilih foto <?= (int)$photo->id ?>"><span>Pilih</span></label><?php endif; ?>
             <a href="<?= site_url('petugas/foto/'.$photo->id) ?>" target="_blank" rel="noopener" aria-label="Buka foto <?= e($photo->caption ?: $photo->original_name) ?>"><img src="<?= site_url('petugas/foto/'.$photo->id) ?>" loading="lazy" alt="<?= e($photo->caption ?: 'Foto dokumentasi order '.$order->request_no) ?>"></a>
-            <div class="gallery-photo-meta"><strong title="<?= e($photo->caption ?: $photo->original_name) ?>"><?= e($photo->caption ?: $photo->original_name) ?></strong><small><?= e(tanggal_id($photo->created_at,TRUE)) ?> · <?= number_format($photo->file_size/1024,0,',','.') ?> KB</small></div>
+            <div class="gallery-photo-meta"><?php if ($can_delete): ?><button class="gallery-delete-button" type="submit" form="gallery-delete-<?= (int)$photo->id ?>" onclick="return confirm('Yakin menghapus foto ini?')" aria-label="Hapus foto">×</button><?php endif; ?><strong title="<?= e($photo->caption ?: $photo->original_name) ?>"><?= e($photo->caption ?: $photo->original_name) ?></strong><small><?= e(tanggal_id($photo->created_at,TRUE)) ?> · <?= number_format($photo->file_size/1024,0,',','.') ?> KB</small></div>
           </article><?php endforeach; ?>
         </div>
       </section><?php endforeach; ?>
     </div>
   <?php else: ?><div class="card table-empty">Belum ada foto dokumentasi untuk filter ini.</div><?php endif; ?>
 </form>
+<?php if ($can_delete): foreach ($photos as $order_photos): foreach ($order_photos as $photo): ?><form id="gallery-delete-<?= (int)$photo->id ?>" method="post" action="<?= site_url('petugas/foto/'.$photo->id.'/hapus') ?>"><?= form_hidden($this->security->get_csrf_token_name(),$this->security->get_csrf_hash()) ?><input type="hidden" name="return_to" value="gallery"></form><?php endforeach; endforeach; endif; ?>
 <?= metro_pager($pagination,'petugas/galeri-laporan',array_filter(array('q'=>$query,'date_from'=>$date_from,'date_to'=>$date_to),function($value){return $value!=='';})) ?>
 <script src="<?= base_url('assets/gallery.js?v=1') ?>" defer></script>

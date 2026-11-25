@@ -405,7 +405,7 @@ def run(dry_run, simulate=False):
                     note += ' Penguji: ' + doc['tester'] + '.'
                     item_id = insert(cur, 'request_items', {'service_request_id': request_id,
                         'unit_sequence': current, 'applicant_uttp_id': asset_id,
-                        'uttp_type_id': types[doc['type_code']]['id'], 'item_status': 'valid',
+                        'uttp_type_id': types[doc['type_code']]['id'], 'service_type': 'tera_ulang', 'item_status': 'valid',
                         'verification_decision': None, 'tested_at': doc['tested_at'],
                         'owner_name': doc['owner'], 'brand': unit['brand'] or 'Tidak tercantum',
                         'type_name': unit['type_name'] or None, 'model_name': unit['model'] or None,

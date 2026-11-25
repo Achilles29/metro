@@ -29,7 +29,6 @@ class Metro_model extends CI_Model
         if ($account && $account->account_type==='applicant') {
             $profile=$this->db->select('profile_kind')->get_where('applicant_profiles',array('user_id'=>(int)$user_id))->row();
             if ($profile && $profile->profile_kind==='organization') {
-                $codes=array_values(array_diff($codes,array('applicant')));
                 $codes[]='business_actor';
             }
         }
@@ -46,7 +45,9 @@ class Metro_model extends CI_Model
             ->where('ct.technician_user_id',(int)$technician_id)
             ->where('ct.company_profile_id',(int)$profile_id)
             ->where('ct.status','active')->where('tp.verification_status','approved')
-            ->where('tu.account_status','active')->where('tu.phone_verified_at IS NOT NULL',NULL,FALSE)
+            ->where('tu.account_status','active')
+            ->group_start()->where('tu.phone_verified_at IS NOT NULL',NULL,FALSE)
+            ->or_where('tu.phone_verification_required',0)->group_end()
             ->where('cu.account_status','active')->where('ap.profile_kind','organization')
             ->count_all_results()>0;
     }
@@ -66,9 +67,19 @@ class Metro_model extends CI_Model
             ->where('tp.verification_status','approved')->where('u.account_status','active')
             ->where('ap.profile_kind','organization')->order_by('ap.organization_name')->get()->result();
     }
-    public function submitted_requests_for($user_id,$limit=NULL,$offset=0,$bucket=NULL)
+    private function self_request_filters($filters)
     {
-        $this->db->select('sr.*,COUNT(ri.id) AS unit_count')->from('service_requests sr')
+        if (!empty($filters['q'])) {
+            $escaped=str_replace(array('!','%','_'),array('!!','!%','!_'),$filters['q']);
+            $pattern=$this->db->escape('%'.$escaped.'%');
+            $exists="EXISTS (SELECT 1 FROM request_items sf WHERE sf.service_request_id=sr.id AND (sf.brand LIKE {$pattern} ESCAPE '!' OR sf.type_name LIKE {$pattern} ESCAPE '!' OR sf.media LIKE {$pattern} ESCAPE '!' OR sf.nozzle_no LIKE {$pattern} ESCAPE '!'))";
+            $this->db->group_start()->like('sr.request_no',$filters['q'])->or_where($exists,NULL,FALSE)->group_end();
+        }
+        if (!empty($filters['status'])) $this->db->where('sr.request_status',$filters['status']);
+    }
+    public function submitted_requests_for($user_id,$limit=NULL,$offset=0,$bucket=NULL,$filters=array())
+    {
+        $this->db->select("sr.*,COUNT(ri.id) AS unit_count,GROUP_CONCAT(DISTINCT COALESCE(ri.service_type,sr.service_type) ORDER BY ri.service_type SEPARATOR ',') AS service_types",FALSE)->from('service_requests sr')
             ->join('request_items ri','ri.service_request_id=sr.id')
             ->join('company_technicians ct','ct.company_profile_id=sr.applicant_profile_id AND ct.technician_user_id=sr.submitted_by_user_id')
             ->join('technician_profiles tp','tp.user_id=ct.technician_user_id')
@@ -77,19 +88,22 @@ class Metro_model extends CI_Model
             ->where('tp.verification_status','approved')->where('ap.profile_kind','organization')
             ->group_by('sr.id')->order_by('sr.created_at','DESC')->order_by('sr.id','DESC');
         if ($bucket!==NULL) $this->request_bucket($bucket);
+        $this->self_request_filters($filters);
         if ($limit!==NULL) $this->db->limit($limit,$offset);
         return $this->db->get()->result();
     }
-    public function submitted_requests_count($user_id,$bucket=NULL)
+    public function submitted_requests_count($user_id,$bucket=NULL,$filters=array())
     {
         $this->db->from('service_requests sr')
+            ->join('request_items ri','ri.service_request_id=sr.id')
             ->join('company_technicians ct','ct.company_profile_id=sr.applicant_profile_id AND ct.technician_user_id=sr.submitted_by_user_id')
             ->join('technician_profiles tp','tp.user_id=ct.technician_user_id')
             ->join('applicant_profiles ap','ap.id=ct.company_profile_id')
             ->where('sr.submitted_by_user_id',(int)$user_id)->where('ct.status','active')
             ->where('tp.verification_status','approved')->where('ap.profile_kind','organization');
         if ($bucket!==NULL) $this->request_bucket($bucket);
-        return $this->db->count_all_results();
+        $this->self_request_filters($filters);
+        return (int)$this->db->select('COUNT(DISTINCT sr.id) AS total',FALSE)->get()->row()->total;
     }
     public function permissions_for($user_id)
     {
@@ -107,6 +121,10 @@ class Metro_model extends CI_Model
     {
         $permissions=$this->permissions_for($user_id);
         return in_array('*',$permissions,TRUE) || in_array($permission,$permissions,TRUE);
+    }
+    public function forget_permissions($user_id)
+    {
+        unset($this->role_cache[$user_id],$this->permission_cache[$user_id]);
     }
     public function users_with_permission($permission)
     {
@@ -183,22 +201,25 @@ class Metro_model extends CI_Model
         elseif ($bucket==='terminal') $this->db->where('NOT '.$open,NULL,FALSE);
         else $this->db->where($open,NULL,FALSE);
     }
-    public function requests_for($user_id, $limit = NULL, $offset = 0, $bucket=NULL)
+    public function requests_for($user_id, $limit = NULL, $offset = 0, $bucket=NULL,$filters=array())
     {
-        $this->db->select('sr.*, COUNT(ri.id) AS unit_count')
+        $this->db->select("sr.*, COUNT(ri.id) AS unit_count, GROUP_CONCAT(DISTINCT COALESCE(ri.service_type,sr.service_type) ORDER BY ri.service_type SEPARATOR ',') AS service_types",FALSE)
             ->from('service_requests sr')->join('applicant_profiles p', 'p.id=sr.applicant_profile_id')
             ->join('request_items ri', 'ri.service_request_id=sr.id')
             ->where('p.user_id', $user_id)->group_by('sr.id')->order_by('sr.created_at', 'DESC')->order_by('sr.id','DESC');
         if ($bucket!==NULL) $this->request_bucket($bucket);
+        $this->self_request_filters($filters);
         if ($limit !== NULL) $this->db->limit($limit, $offset);
         return $this->db->get()->result();
     }
-    public function requests_for_count($user_id,$bucket=NULL)
+    public function requests_for_count($user_id,$bucket=NULL,$filters=array())
     {
         $this->db->from('service_requests sr')->join('applicant_profiles p','p.id=sr.applicant_profile_id')
+            ->join('request_items ri','ri.service_request_id=sr.id')
             ->where('p.user_id',$user_id);
         if ($bucket!==NULL) $this->request_bucket($bucket);
-        return $this->db->count_all_results();
+        $this->self_request_filters($filters);
+        return (int)$this->db->select('COUNT(DISTINCT sr.id) AS total',FALSE)->get()->row()->total;
     }
     private function queue_base($query, $technician_id, $filters)
     {
@@ -221,7 +242,7 @@ class Metro_model extends CI_Model
             elseif ($filters['status'] === 'in_progress') $this->db->where('sr.request_status', 'in_progress');
             else $this->db->where('ri.item_status', $filters['status']);
         }
-        if (!empty($filters['service_type'])) $this->db->where('sr.service_type', $filters['service_type']);
+        if (!empty($filters['service_type'])) $this->db->where('COALESCE(ri.service_type,sr.service_type)',$filters['service_type']);
         if (!empty($filters['date_from'])) $this->db->where('sr.submitted_at >=', $filters['date_from'] . ' 00:00:00');
         if (!empty($filters['date_to'])) $this->db->where('sr.submitted_at <=', $filters['date_to'] . ' 23:59:59');
         if (!empty($filters['applicant_id'])) $this->db->where('p.user_id', (int) $filters['applicant_id']);
@@ -235,7 +256,7 @@ class Metro_model extends CI_Model
     public function queue($query = '', $technician_id = NULL, $filters = array(), $limit = 100, $offset = 0)
     {
         $this->queue_base($query, $technician_id, $filters);
-        return $this->db->select('sr.*, u.full_name, p.organization_name, COALESCE(po.option_label,sr.penera_name) AS penera_display, COUNT(DISTINCT ri.id) AS unit_count',FALSE)
+        return $this->db->select("sr.*, u.full_name, p.organization_name, COALESCE(po.option_label,sr.penera_name) AS penera_display, COUNT(DISTINCT ri.id) AS unit_count, GROUP_CONCAT(DISTINCT COALESCE(ri.service_type,sr.service_type) ORDER BY ri.service_type SEPARATOR ',') AS service_types",FALSE)
             ->group_by('sr.id')->order_by('sr.submitted_at','DESC')->order_by('sr.id','DESC')
             ->limit($limit,$offset)->get()->result();
     }
@@ -245,7 +266,7 @@ class Metro_model extends CI_Model
         $this->db->from('users u')->join('applicant_profiles p', 'p.user_id=u.id')
             ->where('u.account_type', 'applicant');
         if ($query !== '') $this->db->group_start()->like('u.full_name', $query)
-            ->or_like('u.email', $query)->or_like('p.organization_name', $query)->group_end();
+            ->or_like('u.email', $query)->or_like('u.username', $query)->or_like('p.organization_name', $query)->group_end();
     }
     public function applicants_count($query = '')
     {
@@ -255,7 +276,7 @@ class Metro_model extends CI_Model
     public function applicants($query = '', $limit = 20, $offset = 0)
     {
         $this->applicants_base($query);
-        $this->db->select('u.id, u.full_name, u.email, u.phone, u.account_status, u.phone_verified_at, u.phone_verification_required, p.id AS profile_id, p.organization_name, p.profile_kind, p.contact_person, p.address, p.district_id, p.village_id, v.village_name,
+        $this->db->select('u.id, u.full_name, u.username, u.email, u.phone, u.account_status, u.phone_verified_at, u.phone_verification_required, p.id AS profile_id, p.organization_name, p.profile_kind, p.contact_person, p.address, p.district_id, p.village_id, v.village_name,
             COUNT(DISTINCT sr.id) AS request_count, MAX(sr.submitted_at) AS last_submission', FALSE)
             ->join('master_villages v','v.id=p.village_id','left')
             ->join('service_requests sr', 'sr.applicant_profile_id=p.id', 'left')
@@ -289,9 +310,10 @@ class Metro_model extends CI_Model
 
     public function report_summary($start, $end)
     {
-        $requests = $this->db->select('service_type, COUNT(*) AS total')->from('service_requests')
-            ->where('submitted_at >=', $start)->where('submitted_at <', $end)
-            ->group_by('service_type')->get()->result();
+        $requests = $this->db->select('COALESCE(ri.service_type,sr.service_type) AS service_type, COUNT(DISTINCT sr.id) AS total',FALSE)
+            ->from('service_requests sr')->join('request_items ri','ri.service_request_id=sr.id')
+            ->where('sr.submitted_at >=', $start)->where('sr.submitted_at <', $end)
+            ->group_by('COALESCE(ri.service_type,sr.service_type)')->get()->result();
         $items = $this->db->select('ri.item_status, COUNT(*) AS total')->from('request_items ri')
             ->join('service_requests sr', 'sr.id=ri.service_request_id')
             ->where('sr.submitted_at >=', $start)->where('sr.submitted_at <', $end)
@@ -301,12 +323,14 @@ class Metro_model extends CI_Model
             ->join('uttp_types t', 't.id=ri.uttp_type_id')
             ->where('sr.submitted_at >=', $start)->where('sr.submitted_at <', $end)
             ->group_by('t.id')->order_by('total', 'DESC')->limit(10)->get()->result();
-        return array('requests' => $requests, 'items' => $items, 'types' => $types);
+        $request_total=(int)$this->db->where('submitted_at >=',$start)->where('submitted_at <',$end)
+            ->count_all_results('service_requests');
+        return array('requests' => $requests, 'items' => $items, 'types' => $types,'total_requests'=>$request_total);
     }
 
     public function report_rows($start, $end)
     {
-        return $this->db->select('sr.id, sr.request_no, sr.submitted_at, sr.service_type, sr.request_status, COUNT(ri.id) AS unit_count')
+        return $this->db->select("sr.id, sr.request_no, sr.submitted_at, sr.service_type, sr.request_status, COUNT(ri.id) AS unit_count, GROUP_CONCAT(DISTINCT COALESCE(ri.service_type,sr.service_type) ORDER BY ri.service_type SEPARATOR ',') AS service_types",FALSE)
             ->from('service_requests sr')->join('request_items ri', 'ri.service_request_id=sr.id')
             ->where('sr.submitted_at >=', $start)->where('sr.submitted_at <', $end)
             ->group_by('sr.id')->order_by('sr.submitted_at', 'ASC')->get()->result();

@@ -570,7 +570,8 @@ class Verification extends MY_Controller
         $this->db->where('id',$photo->id)->where('deleted_at IS NULL',NULL,FALSE)->update('request_photos',array(
             'deleted_at'=>date('Y-m-d H:i:s'),'deleted_by'=>$actor->id));
         $this->metro->audit($actor->id,'verification_photo_delete','request_photos',$photo->id);
-        $this->message('Foto dokumentasi dihapus.','petugas/permohonan/'.$request->id.'?tab=process#dokumentasi-kegiatan');
+        $this->message('Foto dokumentasi dihapus.',$this->input->post('return_to',TRUE)==='gallery'
+            ?'petugas/galeri-laporan':'petugas/permohonan/'.$request->id.'?tab=process#dokumentasi-kegiatan');
     }
 
     private function review_pdf_bytes($request)

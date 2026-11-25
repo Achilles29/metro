@@ -1,5 +1,5 @@
 -- Hak akses rinci untuk petugas, pemohon, pelaku usaha, dan teknisi eksternal.
--- Aman dijalankan ulang; izin lama disalin sebelum izin gabungan dihapus.
+-- Jalankan satu kali sebelum izin disesuaikan admin; izin lama disalin sebelum izin gabungan dihapus.
 USE metro_app;
 
 INSERT INTO roles (role_code,role_name,description,is_active,sort_order)
@@ -53,12 +53,13 @@ JOIN permissions new_permission ON
 
 INSERT IGNORE INTO role_permissions (role_id,permission_id)
 SELECT r.id,p.id FROM roles r JOIN permissions p ON
- (r.role_code IN ('applicant','business_actor') AND p.permission_code IN
+ (r.role_code='applicant' AND p.permission_code IN
   ('self.profile.view','self.profile.update','self.uttp.view','self.uttp.create','self.uttp.update','self.uttp.status','self.uttp.delete','self.requests.view','self.requests.create','self.requests.revise','self.requests.feedback')) OR
  (r.role_code='business_actor' AND p.permission_code IN ('self.delegation.view','self.delegation.invite','self.delegation.respond')) OR
  (r.role_code='external_technician' AND p.permission_code IN
   ('self.technician_profile.view','self.technician_profile.update','self.requests.view','self.requests.create','self.requests.revise','self.delegation.view','self.delegation.invite','self.delegation.respond')) OR
  (r.role_code='administrator' AND p.permission_code IN
-  ('staff.view','staff.create','staff.update','staff.status','staff.delete','applicants.view','applicants.create','applicants.update','applicants.status','applicants.delete','technicians.view','technicians.verify','technicians.delegation_review','masters.view','masters.create','masters.update','masters.status','masters.delete'));
+  ('staff.view','staff.create','staff.update','staff.status','staff.delete','applicants.view','applicants.create','applicants.update','applicants.status','applicants.delete','technicians.view','technicians.verify','technicians.delegation_review','masters.view','masters.create','masters.update','masters.status','masters.delete'))
+WHERE NOT EXISTS (SELECT 1 FROM role_permissions existing WHERE existing.role_id=r.id);
 
 DELETE FROM permissions WHERE permission_code IN ('staff.manage','applicants.manage','technicians.manage','masters.manage');

@@ -18,6 +18,9 @@
   const updateCapacity = card => {
     const select = card.querySelector('[name="uttp_type_id[]"]');
     const mass = select.selectedOptions[0]?.dataset.mass === '1';
+    const pubbm=select.selectedOptions[0]?.dataset.pubbm==='1';
+    card.querySelectorAll('[data-pubbm-field]').forEach(el=>el.hidden=!pubbm);
+    card.querySelectorAll('[data-other-field]').forEach(el=>el.hidden=pubbm);
     const field = card.querySelector('.capacity-field');
     field.hidden = !mass;
     if (!mass) field.querySelector('input').value = '';
@@ -30,7 +33,7 @@
     });
   };
   const add = () => {
-    if (list.children.length >= 20) return;
+    if (list.children.length >= 100) return;
     list.appendChild(template.content.cloneNode(true));
     update();
   };
@@ -45,6 +48,7 @@
         card.querySelector('[name="type_name[]"]').value=data.typeName || '';
         card.querySelector('[name="capacity[]"]').value=data.capacity || '';
         card.querySelector('[name="serial_number[]"]').value=data.serial || '';
+        for (const [field,key] of Object.entries({nozzle_no:'nozzle',dispenser_no:'dispenser',media:'media',manufacture_year:'year',flow_rate:'flow',readability:'readability'})) card.querySelector(`[name="${field}[]"]`).value=data[key] || '';
         card.querySelector('[name="item_address[]"]').value=data.address || '';
         card.querySelector('[name="item_latitude[]"]').value=data.lat || '';
         card.querySelector('[name="item_longitude[]"]').value=data.lng || '';

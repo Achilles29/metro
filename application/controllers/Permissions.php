@@ -26,6 +26,7 @@ class Permissions extends MY_Controller
             return strpos($permission_code,'self.requests.')===0
                 || strpos($permission_code,'self.delegation.')===0
                 || strpos($permission_code,'self.technician_profile.')===0;
+        if ($role_code==='business_actor') return strpos($permission_code,'self.delegation.')===0;
         if (strpos($permission_code,'self.technician_profile.')===0) return FALSE;
         if ($role_code==='applicant' && strpos($permission_code,'self.delegation.')===0) return FALSE;
         return TRUE;

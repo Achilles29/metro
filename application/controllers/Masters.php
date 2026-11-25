@@ -15,6 +15,12 @@ class Masters extends MY_Controller
         if (!$this->metro->can($actor->id,$id?'masters.update':'masters.create')) show_error('Akses ditolak.',403);
     }
 
+    private function require_status_change($actor,$existing,$active)
+    {
+        if ($existing && (int)$existing->is_active!==(int)$active
+            && !$this->metro->can($actor->id,'masters.status')) show_error('Akses ditolak.',403);
+    }
+
     private function integer($name, $default = 0)
     {
         $value = filter_var($this->input->post($name), FILTER_VALIDATE_INT);
@@ -193,6 +199,8 @@ class Masters extends MY_Controller
             $description = trim((string) $this->input->post('description', TRUE));
             $sort = $this->integer('sort_order');
             $active = $group->allow_create ? ($this->input->post('is_active') ? 1 : 0) : (int) ($existing ? $existing->is_active : 1);
+            if ($existing && !$this->metro->can($actor->id,'masters.status')) $active=(int)$existing->is_active;
+            $this->require_status_change($actor,$existing,$active);
             $tone = $group->has_tone ? (string) $this->input->post('tone', TRUE) : NULL;
             $location_id = $group->has_location ? (int) $this->input->post('service_location_id') : 0;
             $sheet_url = $group_code==='ctt' ? trim((string)$this->input->post('spreadsheet_url',TRUE)) : NULL;
@@ -284,6 +292,8 @@ class Masters extends MY_Controller
             $name = trim((string) $this->input->post('type_name',TRUE));
             $desc = trim((string) $this->input->post('description',TRUE));
             $active = $this->input->post('is_active') ? 1 : 0;
+            if ($existing && !$this->metro->can($actor->id,'masters.status')) $active=(int)$existing->is_active;
+            $this->require_status_change($actor,$existing,$active);
             if (!$this->code($code) || mb_strlen($name) < 2 || mb_strlen($name) > 160 || mb_strlen($desc) > 1000) {
                 $this->fail('Periksa kode, nama, dan deskripsi UTTP.',$url); return;
             }
@@ -315,6 +325,8 @@ class Masters extends MY_Controller
             if (!$this->code($code,24) || mb_strlen($name)<2 || mb_strlen($name)>120) { $this->fail('Periksa kode dan nama kecamatan.',$url); return; }
             if (!$existing && $this->db->get_where('master_districts',array('district_code'=>$code))->row()) { $this->fail('Kode kecamatan sudah digunakan.',$url); return; }
             $active=$this->input->post('is_active')?1:0;
+            if ($existing && !$this->metro->can($actor->id,'masters.status')) $active=(int)$existing->is_active;
+            $this->require_status_change($actor,$existing,$active);
             if (!$active && $existing && $existing->is_active && $this->db->where('is_active',1)->count_all_results('master_districts')<=1) {
                 $this->fail('Minimal satu kecamatan harus tetap aktif.',$url); return;
             }
@@ -346,6 +358,8 @@ class Masters extends MY_Controller
                 $this->fail('Desa yang sudah digunakan tidak dapat dipindah kecamatan.',$url); return;
             }
             $active=$this->input->post('is_active')?1:0;
+            if ($existing && !$this->metro->can($actor->id,'masters.status')) $active=(int)$existing->is_active;
+            $this->require_status_change($actor,$existing,$active);
             if (!$active && $existing && $existing->is_active && $district->is_active
                 && $this->db->where('district_id',$existing->district_id)->where('is_active',1)->count_all_results('master_villages')<=1) {
                 $this->fail('Minimal satu desa dalam kecamatan aktif harus tetap tersedia.',$url); return;
@@ -383,6 +397,8 @@ class Masters extends MY_Controller
             }
             if (!$existing && $this->db->get_where('master_locations',array('location_code'=>$code))->row()) { $this->fail('Kode lokasi sudah digunakan.',$url); return; }
             $active=$this->input->post('is_active')?1:0;
+            if ($existing && !$this->metro->can($actor->id,'masters.status')) $active=(int)$existing->is_active;
+            $this->require_status_change($actor,$existing,$active);
             if (!$active && $existing && $this->db->where('service_location_id',$existing->id)->where('is_active',1)->count_all_results('master_options')) {
                 $this->fail('Lokasi masih dipakai oleh tempat pelayanan aktif. Nonaktifkan pilihan tempat terlebih dahulu.',$url); return;
             }
@@ -411,6 +427,8 @@ class Masters extends MY_Controller
             $active=$this->input->post('is_active')?1:0;
             if (mb_strlen($name)<3 || mb_strlen($name)>100 || mb_strlen($description)>255) { $this->fail('Periksa nama dan deskripsi peran.',$url); return; }
             if (in_array($row->role_code,array('administrator','applicant','business_actor','external_technician'),TRUE)) $active=1;
+            if (!$this->metro->can($actor->id,'masters.status')) $active=(int)$row->is_active;
+            $this->require_status_change($actor,$row,$active);
             $this->db->where('id',$id)->update('roles',array('role_name'=>$name,'description'=>$description?:NULL,
                 'sort_order'=>$this->integer('sort_order'),'is_active'=>$active));
             $this->saved($actor,'roles',$id,$url);

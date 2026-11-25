@@ -1,0 +1,11 @@
+USE metro_app;
+UPDATE master_options SET description='Data permohonan telah dikirimkan' WHERE group_code='status' AND option_code='submitted';
+UPDATE master_options SET description='Data permohonan telah diverifikasi' WHERE group_code='status' AND option_code='verification';
+UPDATE master_options SET description='Kegiatan pelayanan telah terjadwal' WHERE group_code='status' AND option_code='scheduled';
+UPDATE master_options SET description='UTTP sedang dilakukan pengujian oleh petugas' WHERE group_code='status' AND option_code='testing';
+UPDATE master_options SET description='UTTP Anda Sah untuk digunakan berdagang' WHERE group_code='status' AND option_code IN ('valid','completed');
+UPDATE master_options SET description='UTTP Anda tidak dapat digunakan untuk berdagang' WHERE group_code='status' AND option_code IN ('invalid','cancelled');
+UPDATE master_options SET description='UTTP Anda perlu perbaikan' WHERE group_code='status' AND option_code='returned';
+UPDATE master_options SET description='UTTP Anda di luar kemampuan pelayanan kami' WHERE group_code='status' AND option_code IN ('not_suitable','rejected');
+UPDATE master_options SET description='Permohonan perlu diperbaiki sebelum dilanjutkan' WHERE group_code='status' AND option_code='revision';
+UPDATE master_options SET description='Hasil pemeriksaan sedang ditinjau petugas' WHERE group_code='status' AND option_code='review';

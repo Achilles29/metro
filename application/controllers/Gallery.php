@@ -53,7 +53,8 @@ class Gallery extends MY_Controller
         }
         $this->page('staff/gallery',array('title'=>'Galeri laporan','orders'=>$orders,'photos'=>$photos,
             'pagination'=>$pagination,'query'=>$query,'date_from'=>$date_from,'date_to'=>$date_to,
-            'can_download'=>$this->metro->can($viewer->id,'reports.export')));
+            'can_download'=>$this->metro->can($viewer->id,'reports.export'),
+            'can_delete'=>$this->metro->can($viewer->id,'requests.verify')));
     }
 
     public function download()

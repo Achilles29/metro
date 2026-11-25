@@ -6,6 +6,7 @@ class Documents extends MY_Controller
     public function download($id)
     {
         $user = $this->require_login();
+        if (!$this->metro->is_staff($user->id) && !$this->metro->can($user->id,'self.requests.view')) show_error('Akses ditolak.',403);
         $doc = $this->metro->document((int) $id);
         if (!$doc || !$doc->is_current) show_404();
         $request = $this->metro->request($doc->service_request_id);

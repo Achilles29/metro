@@ -14,6 +14,10 @@ class MY_Controller extends CI_Controller
     protected function user()
     {
         $id = (int) $this->session->userdata('user_id');
+        if (!$id && $this->input->cookie('setimbang_remember',TRUE)) {
+            $this->load->library('remember_me');
+            if ($this->remember_me->restore()) $id=(int)$this->session->userdata('user_id');
+        }
         if (!$id) return NULL;
         $user = $this->metro->user($id);
         $marker = (string) $this->session->userdata('auth_marker');

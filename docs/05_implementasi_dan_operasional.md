@@ -18,7 +18,7 @@ Kredensial administrator awal berada di `docs/AKSES_ADMIN.md` di server. Berkas 
 
 ## Operasi
 
-- Database: `metro_app` (MariaDB); skema dan migrasi di `database/001_initial_schema.sql` hingga `database/006_role_permissions.sql`.
+- Database: `metro_app` (MariaDB); skema dan migrasi berurutan di folder `database/`.
 - Kredensial database dan kunci sesi: `/etc/metro/database.php` dan `/etc/metro/secret.php`, dapat dibaca PHP-FPM dan tidak berada di root web.
 - Dokumen privat: `/var/lib/metro/documents`, sesi: `/var/lib/metro/sessions`.
 - Batas PHP `open_basedir` berada di `.user.ini` situs dan mencakup direktori di atas.
@@ -65,7 +65,7 @@ Master data administrator berada di sidebar **Master data**. Kecamatan, desa/kel
 
 ## Hak akses per peran — 12 November 2026
 
-Superadmin mengatur izin verifier, coordinator, technician, dan issuer melalui **Ruang kerja → Hak akses**. Perubahan izin berlaku pada menu, halaman, tindakan, ekspor, dan unduhan dokumen. Migrasi `database/006_role_permissions.sql` sudah diterapkan; rincian aturan dan saran tahap berikutnya ada di [catatan hak akses dan pengembangan](08_hak_akses_dan_saran_pengembangan.md).
+Superadmin mengatur izin petugas, pemohon, pelaku usaha, dan teknisi eksternal melalui **Ruang kerja → Hak akses**. Izin CRUD akun dan master data dipisah per tindakan. Pelaku usaha mewarisi izin dasar Pemohon dan memiliki izin tambahan untuk pelimpahan. Migrasi `database/016_granular_role_permissions.sql` hingga `database/018_business_permission_inheritance.sql` sudah diterapkan. Panduan terbaru ada di [Pengaturan hak akses](18_pengaturan_hak_akses.md).
 
 ## Setimbang — 13 November 2026
 

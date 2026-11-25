@@ -61,10 +61,57 @@ class Staff extends MY_Controller
             'profile_kinds'=>$this->master->options('profile_kind',FALSE)));
     }
 
+    public function approve_account($id)
+    {
+        $this->post_only();
+        $actor=$this->require_staff();
+        $person=$this->metro->user((int)$id);
+        if (!$person || !in_array($person->account_type,array('applicant','technician'),TRUE) || $person->account_status!=='pending') show_404();
+        $permission=$person->account_type==='technician'?'technicians.verify':'applicants.status';
+        if (!$this->metro->can($actor->id,$permission)) show_error('Akses ditolak.',403);
+        $this->issue_credentials($actor,$person,TRUE);
+    }
+
+    public function reset_credentials($id)
+    {
+        $this->post_only();
+        $actor=$this->require_staff();
+        $person=$this->metro->user((int)$id);
+        if (!$person || !in_array($person->account_type,array('applicant','technician'),TRUE) || $person->account_status!=='active') show_404();
+        $permission=$person->account_type==='technician'?'technicians.update':'applicants.update';
+        if (!$this->metro->can($actor->id,$permission)) show_error('Akses ditolak.',403);
+        $this->issue_credentials($actor,$person,FALSE);
+    }
+
+    private function issue_credentials($actor,$person,$approve)
+    {
+        $this->output->set_header('Cache-Control: no-store, private');
+        $base=preg_replace('/[^a-z0-9]+/','',strtolower(iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$person->full_name)));
+        $base=substr($base?:'pemohon',0,24);
+        $username=$person->username?:$base; $suffix=2;
+        while ($this->db->where('username',$username)->where('id !=',$person->id)->count_all_results('users')) $username=$base.$suffix++;
+        $password=substr(str_replace(array('0','O','l','I'),array('7','P','k','J'),bin2hex(random_bytes(6))),0,12);
+        $this->db->trans_begin();
+        $changes=array('username'=>$username,'password_hash'=>password_hash($password,PASSWORD_DEFAULT),'updated_at'=>date('Y-m-d H:i:s'));
+        if ($approve) { $changes['account_status']='active';$changes['phone_verification_required']=0; }
+        $this->db->where('id',$person->id)->update('users',$changes);
+        $this->db->where('user_id',$person->id)->delete('remember_tokens');
+        $this->metro->audit($actor->id,$approve?'manual_account_approve':'manual_credentials_reset','users',$person->id);
+        if ($this->db->trans_status()===FALSE) { $this->db->trans_rollback(); show_error('Persetujuan akun gagal.',500); }
+        $this->db->trans_commit();
+        $message="Halo {$person->full_name}, akun Setimbang Rembang Anda siap digunakan.\nAlamat: ".site_url('login')."\nUsername: {$username}\nKata sandi: {$password}\nSilakan masuk dan segera ganti kata sandi Anda. Jangan bagikan kata sandi kepada orang lain.";
+        $phone=preg_replace('/[^0-9]/','',(string)$person->phone);
+        if (substr($phone,0,1)==='0') $phone='62'.substr($phone,1);
+        $this->page('staff/account_approved',array('title'=>$approve?'Akun disetujui':'Akses diatur ulang','person'=>$person,'username'=>$username,
+            'password'=>$password,'message_template'=>$message,'wa_url'=>$phone?'https://wa.me/'.$phone.'?text='.rawurlencode($message):NULL,
+            'back_url'=>$person->account_type==='technician'?'petugas/teknisi':'petugas/pemohon'));
+    }
+
     private function applicant_input($existing = NULL)
     {
         $name=trim((string)$this->input->post('full_name',TRUE));
         $email=strtolower(trim((string)$this->input->post('email',TRUE)));
+        $username=strtolower(trim((string)$this->input->post('username',TRUE)));
         $phone=trim((string)$this->input->post('phone',TRUE));
         $password=(string)$this->input->post('password');
         $district_id=(int)$this->input->post('district_id');
@@ -77,19 +124,21 @@ class Staff extends MY_Controller
         $kind_row=$this->master->option_code('profile_kind',$kind,FALSE);
         $unchanged_archive_id=$existing && strtolower((string)$existing->email)===$email
             && preg_match('/^skhp[0-9]{3}@metrologi$/',$email);
-        if (mb_strlen($name)<3 || mb_strlen($name)>160 || (!filter_var($email,FILTER_VALIDATE_EMAIL) && !$unchanged_archive_id)
-            || !preg_match('/^08[0-9]{8,12}$/',$phone) || (!$existing && (strlen($password)<8 || strlen($password)>72))
+        if (mb_strlen($name)<3 || mb_strlen($name)>160 || ($username!=='' && !preg_match('/^[a-z0-9._-]{4,90}$/',$username))
+            || mb_strlen($email)>190 || ($email!=='' && !filter_var($email,FILTER_VALIDATE_EMAIL) && !$unchanged_archive_id)
+            || ($phone!=='' && !preg_match('/^08[0-9]{8,12}$/',$phone)) || (!$existing && (strlen($password)<8 || strlen($password)>72))
             || ($existing && $password!=='' && (strlen($password)<8 || strlen($password)>72))
-            || !$region || !$kind_row || (!$kind_row->is_active && (!$existing || $existing->profile_kind!==$kind))
+            || (!$region && (!$existing || $district_id || $village_id)) || !$kind_row || (!$kind_row->is_active && (!$existing || $existing->profile_kind!==$kind))
             || mb_strlen($contact)<3 || mb_strlen($contact)>160 || mb_strlen($address)<10 || mb_strlen($address)>2000
             || mb_strlen($organization)>190) return NULL;
         $id=$existing?(int)$existing->id:0;
-        if ($this->db->where('email',$email)->where('id !=',$id)->count_all_results('users')
-            || $this->db->where('phone',$phone)->where('id !=',$id)->count_all_results('users')) return NULL;
-        return array('user'=>array('full_name'=>$name,'email'=>$email,'phone'=>$phone),
+        if (($username!=='' && $this->db->where('username',$username)->where('id !=',$id)->count_all_results('users'))
+            || ($email!=='' && $this->db->where('email',$email)->where('id !=',$id)->count_all_results('users'))
+            || ($phone!=='' && $this->db->where('phone',$phone)->where('id !=',$id)->count_all_results('users'))) return NULL;
+        return array('user'=>array('full_name'=>$name,'username'=>$username?:NULL,'email'=>$email?:NULL,'phone'=>$phone?:NULL),
             'password'=>$password,'profile'=>array('profile_kind'=>$kind,'organization_name'=>$organization?:NULL,
-                'contact_person'=>$contact,'address'=>$address,'district_id'=>$district_id,'district'=>$region[0]->district_name,
-                'village_id'=>$village_id,'village'=>$region[1]->village_name));
+                'contact_person'=>$contact,'address'=>$address,'district_id'=>$region?$district_id:NULL,'district'=>$region?$region[0]->district_name:NULL,
+                'village_id'=>$region?$village_id:NULL,'village'=>$region?$region[1]->village_name:NULL));
     }
 
     public function create_applicant()
@@ -103,7 +152,7 @@ class Staff extends MY_Controller
         $this->db->trans_begin();
         $user=$values['user'];
         $user['password_hash']=password_hash($values['password'],PASSWORD_DEFAULT);
-        $user['account_type']='applicant'; $user['account_status']='active'; $user['phone_verification_required']=1;
+        $user['account_type']='applicant'; $user['account_status']='active'; $user['phone_verification_required']=0;
         $this->db->insert('users',$user); $id=$this->db->insert_id();
         $this->db->insert('user_roles',array('user_id'=>$id,'role_id'=>$role->id,'assigned_by'=>$actor->id));
         $profile=$values['profile']; $profile['user_id']=$id;
@@ -111,9 +160,7 @@ class Staff extends MY_Controller
         $this->metro->audit($actor->id,'applicant_create','users',$id);
         if ($this->db->trans_status()===FALSE) { $this->db->trans_rollback(); $this->fail('Pemohon gagal dibuat.','petugas/pemohon'); return; }
         $this->db->trans_commit();
-        $this->load->model('Wa_model','wa');
-        $queued=$this->wa->queue_code($this->metro->user($id));
-        $this->message($queued?'Akun dibuat. Kode verifikasi sedang dikirim ke WhatsApp.':'Akun dibuat. Nomor telepon perlu diverifikasi; kode manual tetap tersedia.','petugas/pemohon/'.$id);
+        $this->message('Akun pemohon dibuat. Sampaikan data masuk kepada pemohon secara manual.','petugas/pemohon/'.$id);
     }
 
     public function update_applicant($id)
@@ -129,9 +176,10 @@ class Staff extends MY_Controller
         if (!$values) { $this->fail('Periksa identitas, wilayah, alamat, dan pastikan email/telepon belum digunakan.','petugas/pemohon'); return; }
         $user=$values['user']; $user['updated_at']=date('Y-m-d H:i:s');
         if ($values['password']!=='') $user['password_hash']=password_hash($values['password'],PASSWORD_DEFAULT);
-        if ($person->phone!==$user['phone']) { $user['phone_verified_at']=NULL; $user['phone_verification_required']=1; }
+        if ($person->phone!==$user['phone']) $user['phone_verified_at']=NULL;
         $this->db->trans_begin();
         $this->db->where('id',$person->id)->update('users',$user);
+        if (isset($user['password_hash'])) $this->db->where('user_id',$person->id)->delete('remember_tokens');
         $values['profile']['updated_at']=date('Y-m-d H:i:s');
         $this->db->where('id',$profile->id)->update('applicant_profiles',$values['profile']);
         if ($person->phone!==$user['phone']) $this->db->where('user_id',$person->id)->where('verified_at IS NULL',NULL,FALSE)
@@ -150,6 +198,7 @@ class Staff extends MY_Controller
         if (!$this->metro->can($actor->id,'applicants.status')) show_error('Akses ditolak.',403);
         $person=$this->metro->user((int)$id);
         if (!$person || $person->account_type!=='applicant') show_404();
+        if ($person->account_status==='pending') { $this->fail('Gunakan tombol Setujui agar username dan kata sandi dapat dikirim.','petugas/pemohon'); return; }
         $status=$person->account_status==='active'?'inactive':'active';
         $this->db->where('id',$person->id)->update('users',array('account_status'=>$status,'updated_at'=>date('Y-m-d H:i:s')));
         $this->metro->audit($actor->id,$status==='active'?'applicant_activate':'applicant_deactivate','users',$person->id);
@@ -206,7 +255,7 @@ class Staff extends MY_Controller
             fputcsv($output, array('Nomor permohonan', 'Tanggal masuk', 'Layanan', 'Status saat ini', 'Jumlah unit'));
             foreach ($this->metro->report_rows($start, $end) as $row) {
                 fputcsv($output, array($row->request_no, $row->submitted_at,
-                    master_label('service_type',$row->service_type), status_label($row->request_status), (int) $row->unit_count));
+                    service_types_label($row->service_types ?: $row->service_type), status_label($row->request_status), (int) $row->unit_count));
             }
             fclose($output);
             exit;
@@ -264,7 +313,9 @@ class Staff extends MY_Controller
         if ($technical_only) $photos=array_values(array_filter($photos,function($photo) use ($item_ids) {
             return !$photo->item_id || in_array((int)$photo->item_id,$item_ids,TRUE);
         }));
+        $this->load->library('skhp_numbers');
         $this->page('staff/workflow', array('title' => 'Kelola ' . $request->request_no,
+            'skhp_suggestion'=>$this->skhp_numbers->preview(),
             'request' => $request, 'items' => $items,
             'documents' => $documents, 'history' => $history,
             'roles' => $this->metro->roles($user->id),
@@ -382,6 +433,7 @@ class Staff extends MY_Controller
         $profile = $this->metro->profile($person->id);
         $error = NULL;
         if ($this->input->method() === 'post') {
+            if (!$this->metro->can($user->id,'applicants.update')) show_error('Akses ditolak.',403);
             $phone = trim((string) $this->input->post('phone', TRUE));
             $duplicate = $this->db->where('phone',$phone)->where('id !=',$person->id)->count_all_results('users');
             if (!preg_match('/^08[0-9]{8,12}$/',$phone) || $duplicate) $error = 'Nomor telepon tidak valid atau sudah terdaftar.';
@@ -584,6 +636,11 @@ class Staff extends MY_Controller
         try { $file = $this->private_files->save('document'); }
         catch (RuntimeException $ex) { $this->upload_fail($ex->getMessage(), $item->service_request_id); return; }
         $this->db->trans_begin();
+        $suggested=trim((string)$this->input->post('suggested_no',TRUE));
+        if ($suggested!=='' && $number===$suggested) {
+            $this->load->library('skhp_numbers');
+            $number=$this->skhp_numbers->allocate();
+        }
         $this->db->where('request_item_id', $item->id)->where('document_type', $type)->update('service_documents', array('is_current' => 0));
         $file['service_request_id'] = $item->service_request_id; $file['request_item_id'] = $item->id;
         $file['document_type'] = $type; $file['visibility'] = $type === 'cerapan' ? 'internal' : 'applicant';
@@ -679,6 +736,24 @@ class Staff extends MY_Controller
         $this->message('Petugas teknis ditugaskan.', 'petugas/permohonan/' . $item->service_request_id . '?tab=process#unit-' . $item->id);
     }
 
+    private function can_manage_staff_role($actor,$role_code)
+    {
+        if ($this->metro->has_role($actor->id,array('administrator'))) return TRUE;
+        if (in_array($role_code,array('administrator','applicant','business_actor','external_technician'),TRUE)) return FALSE;
+        $rows=$this->db->select('p.permission_code')->from('roles r')
+            ->join('role_permissions rp','rp.role_id=r.id')->join('permissions p','p.id=rp.permission_id')
+            ->where('r.role_code',$role_code)->get()->result();
+        foreach ($rows as $row) if (!$this->metro->can($actor->id,$row->permission_code)) return FALSE;
+        return TRUE;
+    }
+
+    private function can_manage_staff_target($actor,$target)
+    {
+        foreach ($this->metro->roles($target->id) as $code)
+            if (!$this->can_manage_staff_role($actor,$code)) return FALSE;
+        return TRUE;
+    }
+
     public function users()
     {
         $actor = $this->require_staff();
@@ -692,7 +767,8 @@ class Staff extends MY_Controller
             $role_code = (string) $this->input->post('role_code', TRUE);
             $role = $this->db->get_where('roles', array('role_code' => $role_code, 'is_active' => 1))->row();
             if (mb_strlen($name) < 3 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8 || strlen($password) > 72
-                || !$role || in_array($role_code, array('administrator','applicant','business_actor','external_technician'), TRUE)) $error = 'Periksa nama, email, peran, dan kata sandi 8–72 karakter.';
+                || !$role || in_array($role_code, array('administrator','applicant','business_actor','external_technician'), TRUE)
+                || !$this->can_manage_staff_role($actor,$role_code)) $error = 'Periksa nama, email, peran, dan kata sandi 8–72 karakter.';
             elseif ($this->metro->user_by_email($email)) $error = 'Email sudah digunakan.';
             else {
                 $this->db->trans_begin();
@@ -707,12 +783,17 @@ class Staff extends MY_Controller
         }
         $total=$this->db->where('account_type','staff')->count_all_results('users');
         $pagination=metro_page($total,$this->input->get('page'),20);
+        $staff_roles=array_values(array_filter($this->master->staff_roles(),function($role) use ($actor) {
+            return $this->can_manage_staff_role($actor,$role->role_code);
+        }));
+        $staff=$this->db->select("u.id,u.full_name,u.email,u.account_status,GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.sort_order SEPARATOR ', ') AS role_name,GROUP_CONCAT(DISTINCT r.role_code ORDER BY r.sort_order SEPARATOR ',') AS role_codes",FALSE)->from('users u')
+            ->join('user_roles ur','ur.user_id=u.id')->join('roles r','r.id=ur.role_id')
+            ->where('u.account_type','staff')->group_by('u.id')->order_by('u.full_name')->order_by('u.id','ASC')
+            ->limit($pagination['per_page'],$pagination['offset'])->get()->result();
+        $manageable=array();
+        foreach ($staff as $person) $manageable[(int)$person->id]=$this->can_manage_staff_target($actor,$person);
         $this->page('staff/users', array('title' => 'Akun petugas', 'error' => $error,
-            'staff_roles' => $this->master->staff_roles(),'pagination'=>$pagination,
-            'staff' => $this->db->select("u.id,u.full_name,u.email,u.account_status,GROUP_CONCAT(DISTINCT r.role_name ORDER BY r.sort_order SEPARATOR ', ') AS role_name,GROUP_CONCAT(DISTINCT r.role_code ORDER BY r.sort_order SEPARATOR ',') AS role_codes",FALSE)->from('users u')
-                ->join('user_roles ur','ur.user_id=u.id')->join('roles r','r.id=ur.role_id')
-                ->where('u.account_type','staff')->group_by('u.id')->order_by('u.full_name')->order_by('u.id','ASC')
-                ->limit($pagination['per_page'],$pagination['offset'])->get()->result()));
+            'staff_roles' => $staff_roles,'pagination'=>$pagination,'staff'=>$staff,'manageable'=>$manageable));
     }
 
     public function update_user($id)
@@ -721,6 +802,7 @@ class Staff extends MY_Controller
         if (!$this->metro->can($actor->id,'staff.update')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
+        if (!$this->can_manage_staff_target($actor,$target)) show_error('Akses ditolak.',403);
         $name=trim((string)$this->input->post('full_name',TRUE));
         $email=strtolower(trim((string)$this->input->post('email',TRUE)));
         $password=(string)$this->input->post('password');
@@ -731,7 +813,8 @@ class Staff extends MY_Controller
         $role=$role_code ? $this->db->get_where('roles',array('role_code'=>$role_code,'is_active'=>1))->row() : NULL;
         if (mb_strlen($name)<3 || mb_strlen($name)>160 || !filter_var($email,FILTER_VALIDATE_EMAIL)
             || ($password!=='' && (strlen($password)<8 || strlen($password)>72))
-            || (!$is_admin && (!$role || in_array($role_code,array('administrator','applicant','business_actor','external_technician'),TRUE) || count($roles)!==1))) {
+            || (!$is_admin && (!$role || in_array($role_code,array('administrator','applicant','business_actor','external_technician'),TRUE)
+                || !$this->can_manage_staff_role($actor,$role_code) || count($roles)!==1))) {
             $this->fail('Periksa nama, email, peran, dan kata sandi (jika diubah).','petugas/akun'); return;
         }
         if ($this->db->where('email',$email)->where('id !=',$target->id)->count_all_results('users')) {
@@ -741,6 +824,7 @@ class Staff extends MY_Controller
         if ($password!=='') $values['password_hash']=password_hash($password,PASSWORD_DEFAULT);
         $this->db->trans_begin();
         $this->db->where('id',$target->id)->update('users',$values);
+        if (isset($values['password_hash'])) $this->db->where('user_id',$target->id)->delete('remember_tokens');
         if (!$is_admin && $roles[0]!==$role_code) {
             $this->db->where('user_id',$target->id)->delete('user_roles');
             $this->db->insert('user_roles',array('user_id'=>$target->id,'role_id'=>$role->id,'assigned_by'=>$actor->id));
@@ -757,6 +841,7 @@ class Staff extends MY_Controller
         if (!$this->metro->can($actor->id,'staff.status')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
+        if (!$this->can_manage_staff_target($actor,$target)) show_error('Akses ditolak.',403);
         if ($target->id==$actor->id || $this->metro->has_role($target->id,array('administrator'))) {
             $this->fail('Akun superadmin tidak dapat dinonaktifkan dari daftar.','petugas/akun'); return;
         }
@@ -772,6 +857,7 @@ class Staff extends MY_Controller
         if (!$this->metro->can($actor->id,'staff.delete')) show_error('Akses ditolak.',403);
         $target=$this->metro->user((int)$id);
         if (!$target || $target->account_type!=='staff') show_404();
+        if (!$this->can_manage_staff_target($actor,$target)) show_error('Akses ditolak.',403);
         $url='petugas/akun';
         if ($target->id==$actor->id || $this->metro->has_role($target->id,array('administrator'))) {
             $this->fail('Akun superadmin tidak dapat dihapus.',$url); return;
@@ -801,6 +887,7 @@ class Staff extends MY_Controller
         if (!$this->metro->can($actor->id,'staff.status') || (int) $id === (int) $actor->id) show_error('Akses ditolak.', 403);
         $target = $this->metro->user((int) $id);
         if (!$target || $target->account_type !== 'staff') show_404();
+        if (!$this->can_manage_staff_target($actor,$target)) show_error('Akses ditolak.',403);
         if ($this->metro->has_role($target->id,array('administrator'))) show_error('Akses ditolak.',403);
         $this->db->where('id', $target->id)->update('users', array('account_status' => 'inactive','updated_at' => date('Y-m-d H:i:s')));
         $this->metro->audit($actor->id, 'staff_deactivate', 'users', $target->id);

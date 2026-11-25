@@ -3,9 +3,19 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 
 class Auth extends MY_Controller
 {
+    private function home_for($user)
+    {
+        if ($this->metro->is_staff($user->id)) return 'petugas';
+        $routes=$user->account_type==='technician'
+            ?array('self.technician_profile.view'=>'profil-teknisi','self.requests.view'=>'permohonan','self.delegation.view'=>'pelimpahan')
+            :array('self.requests.view'=>'permohonan','self.profile.view'=>'profil','self.uttp.view'=>'uttp','self.delegation.view'=>'pelimpahan');
+        foreach ($routes as $permission=>$route) if ($this->metro->can($user->id,$permission)) return $route;
+        return 'ganti-kata-sandi';
+    }
+
     public function login()
     {
-        if ($this->user()) redirect($this->metro->is_staff($this->user()->id) ? 'petugas' : ($this->user()->account_type==='technician'?'profil-teknisi':'permohonan'));
+        if ($this->user()) redirect($this->home_for($this->user()));
         $error = NULL;
         if ($this->input->method() === 'post') {
             $email = strtolower(trim((string) $this->input->post('email', TRUE)));
@@ -17,18 +27,21 @@ class Auth extends MY_Controller
             if ($attempts >= 8) {
                 $error = 'Terlalu banyak percobaan. Coba lagi dalam 15 menit.';
             } else {
-                $user = $this->metro->user_by_email($email);
+                $user = $this->db->group_start()->where('email',$email)->or_where('username',$email)->group_end()->get('users')->row();
                 if ($user && $user->account_status === 'active' && password_verify($password, $user->password_hash)) {
+                    $this->load->library('remember_me');
+                    $this->remember_me->forget();
                     $this->session->sess_regenerate(TRUE);
                     $this->session->set_userdata('user_id', (int) $user->id);
                     $this->session->set_userdata('auth_marker', hash('sha256', $user->password_hash));
+                    if ($this->input->post('remember_me')==='1') $this->remember_me->issue($user->id);
                     $this->db->where('id', $user->id)->update('users', array('last_login_at' => date('Y-m-d H:i:s')));
                     if ($this->metro->is_staff($user->id)) $this->metro->audit($user->id, 'staff_login', 'users', $user->id);
-                    redirect($this->metro->is_staff($user->id) ? 'petugas' : ($user->account_type==='technician'?'profil-teknisi':'permohonan'));
+                    redirect($this->home_for($user));
                     return;
                 }
                 $this->db->insert('login_attempts', array('email' => $email, 'ip_address' => $this->input->ip_address()));
-                $error = 'Email atau kata sandi tidak cocok.';
+                $error = 'Username/email atau kata sandi tidak cocok. Jika baru mendaftar, tunggu persetujuan petugas.';
             }
         }
         $this->page('auth/login', array('title' => 'Masuk', 'error' => $error));
@@ -36,21 +49,20 @@ class Auth extends MY_Controller
 
     public function register()
     {
-        if ($this->user()) redirect($this->user()->account_type==='technician'?'profil-teknisi':'permohonan');
+        if ($this->user()) redirect($this->home_for($this->user()));
         $error = NULL;
         if ($this->input->method() === 'post') {
             $name = trim((string) $this->input->post('full_name', TRUE));
             $email = strtolower(trim((string) $this->input->post('email', TRUE)));
             $phone = trim((string) $this->input->post('phone', TRUE));
-            $password = (string) $this->input->post('password');
             $district_id = (int) $this->input->post('district_id');
             $village_id = (int) $this->input->post('village_id');
             $kind=(string)$this->input->post('account_kind',TRUE);
             $technician=$kind==='technician';
             $region=$technician ? NULL : $this->master->profile_region($district_id,$village_id);
             $recommendation=trim((string)$this->input->post('recommendation_number',TRUE));
-            if (mb_strlen($name) < 3 || mb_strlen($name) > 160 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8 || strlen($password) > 72) {
-                $error = 'Isi nama, email yang valid, dan kata sandi 8–72 karakter.';
+            if (mb_strlen($name) < 3 || mb_strlen($name) > 160 || mb_strlen($email)>190 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $error = 'Isi nama dan email yang valid.';
             } elseif (!in_array($kind,array('applicant','technician'),TRUE)
                 || !preg_match('/^08[0-9]{8,12}$/', $phone) || (!$technician && !$region)
                 || mb_strlen($recommendation)>120) {
@@ -64,10 +76,10 @@ class Auth extends MY_Controller
                 if (!$role) { $error='Pendaftaran jenis akun ini sedang tidak tersedia.'; }
                 else {
                 $this->db->trans_begin();
-                $password_hash = password_hash($password, PASSWORD_DEFAULT);
+                $password_hash = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
                 $this->db->insert('users', array('full_name' => $name, 'email' => $email,
                     'phone' => $phone, 'password_hash' => $password_hash,
-                    'account_type' => $technician?'technician':'applicant', 'account_status' => 'active', 'phone_verification_required' => 1));
+                    'account_type' => $technician?'technician':'applicant', 'account_status' => 'pending', 'phone_verification_required' => 0));
                 $id = $this->db->insert_id();
                 $this->db->insert('user_roles', array('user_id' => $id, 'role_id' => $role->id));
                 if ($technician) $this->db->insert('technician_profiles',array('user_id'=>$id,
@@ -79,13 +91,8 @@ class Auth extends MY_Controller
                     $error = 'Pendaftaran gagal. Periksa data dan coba lagi.';
                 } else {
                     $this->db->trans_commit();
-                    $this->session->sess_regenerate(TRUE);
-                    $this->session->set_userdata('user_id', $id);
-                    $this->session->set_userdata('auth_marker', hash('sha256', $password_hash));
-                    $this->load->model('Wa_model','wa');
-                    $queued=$this->wa->queue_code($this->metro->user($id));
-                    $this->session->set_flashdata('message',$queued?'Kode verifikasi sedang dikirim ke WhatsApp Anda.':'Akun dibuat. Jika bot WhatsApp belum tersedia, minta kode manual kepada petugas.');
-                    redirect($technician?'profil-teknisi':'profil');
+                    $this->session->set_flashdata('message','Pendaftaran diterima. Petugas akan memeriksa data dan mengirim username serta kata sandi melalui WhatsApp secara manual.');
+                    redirect('login');
                     return;
                 }
                 }
@@ -99,6 +106,8 @@ class Auth extends MY_Controller
     public function logout()
     {
         $this->post_only();
+        $this->load->library('remember_me');
+        $this->remember_me->forget();
         $this->session->sess_destroy();
         redirect('login');
     }
@@ -108,9 +117,11 @@ class Auth extends MY_Controller
         $user = $this->require_login();
         if ($this->metro->is_staff($user->id)) redirect('petugas');
         if ($user->account_type==='technician') redirect('profil-teknisi');
+        if (!$this->metro->can($user->id,'self.profile.view')) show_error('Akses ditolak.',403);
         $profile = $this->metro->profile($user->id);
         $error = NULL;
         if ($this->input->method() === 'post') {
+            if (!$this->metro->can($user->id,'self.profile.update')) show_error('Akses ditolak.',403);
             $address = trim((string) $this->input->post('address', TRUE));
             $contact = trim((string) $this->input->post('contact_person', TRUE));
             $district_id = (int) $this->input->post('district_id');
@@ -133,7 +144,8 @@ class Auth extends MY_Controller
                     'district' => $region[0]->district_name, 'district_id' => $district_id,
                     'village' => $region[1]->village_name, 'village_id' => $village_id,
                     'updated_at' => date('Y-m-d H:i:s')));
-                $this->message('Profil tersimpan.', $user->phone_verification_required && !$user->phone_verified_at ? 'profil' : 'permohonan');
+                $this->metro->forget_permissions($user->id);
+                $this->message('Profil tersimpan.', $user->phone_verification_required && !$user->phone_verified_at ? 'profil' : $this->home_for($user));
                 return;
             }
         }
@@ -196,6 +208,8 @@ class Auth extends MY_Controller
             else {
                 $new_hash = password_hash($new, PASSWORD_DEFAULT);
                 $this->db->where('id', $user->id)->update('users', array('password_hash' => $new_hash, 'updated_at' => date('Y-m-d H:i:s')));
+                $this->load->library('remember_me');
+                $this->remember_me->forget_user($user->id);
                 $this->session->set_userdata('auth_marker', hash('sha256', $new_hash));
                 $this->metro->audit($user->id, 'password_change', 'users', $user->id);
                 $this->message('Kata sandi berhasil diganti.', $this->metro->is_staff($user->id) ? 'petugas' : ($user->account_type==='technician'?'profil-teknisi':'permohonan'));
@@ -203,5 +217,31 @@ class Auth extends MY_Controller
             }
         }
         $this->page('auth/change_password', array('title' => 'Ganti kata sandi', 'error' => $error));
+    }
+
+    public function account()
+    {
+        $this->post_only();
+        $user=$this->require_login();
+        if ($this->metro->is_staff($user->id)) show_error('Akses ditolak.',403);
+        $target=$user->account_type==='technician'?'profil-teknisi':'profil';
+        $username=strtolower(trim((string)$this->input->post('username',TRUE)));
+        $email=strtolower(trim((string)$this->input->post('email',TRUE)));
+        $phone=trim((string)$this->input->post('phone',TRUE));
+        $password=(string)$this->input->post('current_password');
+        if (!password_verify($password,$user->password_hash)) { $this->fail('Kata sandi saat ini tidak cocok.',$target); return; }
+        if (!preg_match('/^[a-z0-9._-]{4,90}$/',$username) || mb_strlen($email)>190 || ($email!=='' && !filter_var($email,FILTER_VALIDATE_EMAIL))
+            || ($phone!=='' && !preg_match('/^08[0-9]{8,12}$/',$phone))) {
+            $this->fail('Periksa username, email, dan nomor telepon.',$target); return;
+        }
+        foreach (array('username'=>$username,'email'=>$email?:NULL,'phone'=>$phone?:NULL) as $field=>$value)
+            if ($value!==NULL && $this->db->where($field,$value)->where('id !=',$user->id)->count_all_results('users')) {
+                $this->fail(ucfirst($field).' sudah digunakan akun lain.',$target); return;
+            }
+        $changes=array('username'=>$username,'email'=>$email?:NULL,'phone'=>$phone?:NULL,'updated_at'=>date('Y-m-d H:i:s'));
+        if ($phone!==(string)$user->phone) $changes['phone_verified_at']=NULL;
+        $this->db->where('id',$user->id)->update('users',$changes);
+        $this->metro->audit($user->id,'account_contact_update','users',$user->id);
+        $this->message('Kontak dan username tersimpan.',$target);
     }
 }

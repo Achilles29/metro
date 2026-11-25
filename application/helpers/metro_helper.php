@@ -35,6 +35,20 @@ function master_label($group, $code)
 
 function status_label($code) { return master_label('status', $code); }
 
+function status_description($code)
+{
+    $options=master_option_map('status');
+    return isset($options[$code]) ? (string)$options[$code]->description : '';
+}
+
+function service_types_label($codes)
+{
+    $labels=array();
+    foreach (array_unique(array_filter(explode(',',(string)$codes))) as $code)
+        $labels[]=master_label('service_type',$code);
+    return implode(' / ',$labels);
+}
+
 function metro_terminal_statuses()
 {
     return array('valid','invalid','returned','not_suitable','completed','rejected','cancelled');

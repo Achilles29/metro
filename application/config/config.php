@@ -23,7 +23,9 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 | a PHP script and you can easily do that on your own.
 |
 */
-$config['base_url'] = 'https://metrologi.projectpintar.com/';
+$config['base_url'] = strtolower($_SERVER['HTTP_HOST'] ?? '') === 'setimbang.rembangkab.go.id'
+    ? 'https://setimbang.rembangkab.go.id/'
+    : 'https://metrologi.projectpintar.com/';
 
 /*
 |--------------------------------------------------------------------------

@@ -39,9 +39,7 @@ class Metro_reports
             ->join('request_items i','i.id=h.request_item_id')->where('i.service_request_id',$request->id)
             ->where('h.note IS NOT NULL',NULL,FALSE)->order_by('h.id','DESC')->get()->result();
         foreach ($history as $row) if (!isset($notes[(int)$row->request_item_id])) $notes[(int)$row->request_item_id]=$row->note;
-        $order_ready=TRUE;foreach ($items as $item) if (metro_is_valid($item->item_status) && !isset($certificates[(int)$item->id])) {$order_ready=FALSE;break;}
-        $previous_order=$ci->db->get_where('request_report_syncs',array('request_id'=>$request->id,'report_type'=>'order'))->row();
-        $jobs=($order_ready || ($previous_order && $previous_order->remote_range))?array('order'=>array($items,'order')):array();
+        $jobs=array('order'=>array($items,'order'));
         foreach ($groups as $key=>$group) if ($group) $jobs['ttu_'.$key]=array($group,$key);
         $errors=array();foreach ($jobs as $name=>$job) {
             $sync=$ci->db->get_where('request_report_syncs',array('request_id'=>$request->id,'report_type'=>$name))->row();
